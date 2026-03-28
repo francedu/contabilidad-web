@@ -256,78 +256,7 @@ def create_app() -> Flask:
             """
         )
         backups = listar_backups()[:5]
-
-        resumen_mes = db.fetchone(
-            """
-            SELECT
-                COALESCE(SUM(CASE WHEN tipo='ingreso' THEN monto ELSE 0 END),0) ingresos_mes,
-                COALESCE(SUM(CASE WHEN tipo='gasto' THEN monto ELSE 0 END),0) gastos_mes,
-                COUNT(*) movimientos_mes
-            FROM movimientos
-            WHERE substr(fecha, 1, 7) = ?
-            """
-            ,(mes,)
-        )
-        alumnos_activos = db.fetchone('SELECT COUNT(*) AS total FROM alumnos WHERE activo = 1')
-        cuotas = resumen_cuotas_por_alumno(db, mes)
-        total_esperado = sum(float(f['cuota_mensual']) for f in cuotas if f['activo'])
-        total_pagado = sum(float(f['pagado']) for f in cuotas if f['activo'])
-        deuda_total = sum(max(float(f['cuota_mensual']) - float(f['pagado']), 0) for f in cuotas if f['activo'])
-        alumnos_pagados = 0
-        alumnos_parciales = 0
-        alumnos_deuda = 0
-        for fila in cuotas:
-            if not fila['activo']:
-                continue
-            estado, _icono = estado_cuota(fila['cuota_mensual'], fila['pagado'])
-            if estado == 'Pagado':
-                alumnos_pagados += 1
-            elif estado == 'Parcial':
-                alumnos_parciales += 1
-            else:
-                alumnos_deuda += 1
-
-        ingresos_mes = float(resumen_mes['ingresos_mes'] or 0)
-        gastos_mes = float(resumen_mes['gastos_mes'] or 0)
-        balance_total = float(resumen['ingresos'] or 0) - float(resumen['gastos'] or 0)
-        balance_mes = ingresos_mes - gastos_mes
-        cumplimiento = round((total_pagado / total_esperado) * 100, 1) if total_esperado else 100.0
-        ultimo_mes = dict(reporte[-1]) if reporte else {'mes': mes, 'ingresos': 0, 'gastos': 0}
-        quick_actions = [
-            {'label': 'Nuevo pago', 'href': url_for('pagos_new'), 'icon': '💳', 'hint': 'Registrar cuota o aporte'},
-            {'label': 'Nuevo ingreso', 'href': url_for('movimientos_new') + '?tipo=ingreso', 'icon': '➕', 'hint': 'Agregar ingreso manual'},
-            {'label': 'Nuevo gasto', 'href': url_for('movimientos_new') + '?tipo=gasto', 'icon': '🧾', 'hint': 'Registrar egreso'},
-            {'label': 'Ver cuotas', 'href': url_for('cuotas_view', mes=mes), 'icon': '📌', 'hint': 'Revisar estado mensual'},
-        ]
-
-        dashboard_stats = {
-            'balance_total': balance_total,
-            'balance_mes': balance_mes,
-            'deuda_total': deuda_total,
-            'alumnos_activos': int(alumnos_activos['total'] or 0),
-            'alumnos_pagados': alumnos_pagados,
-            'alumnos_parciales': alumnos_parciales,
-            'alumnos_deuda': alumnos_deuda,
-            'ingresos_mes': ingresos_mes,
-            'gastos_mes': gastos_mes,
-            'movimientos_mes': int(resumen_mes['movimientos_mes'] or 0),
-            'cumplimiento': cumplimiento,
-            'ultimo_mes': ultimo_mes,
-            'total_esperado': total_esperado,
-            'total_pagado': total_pagado,
-        }
-
-        return render_template(
-            'dashboard.html',
-            resumen=resumen,
-            reporte=reporte,
-            mes=mes,
-            alertas=alertas,
-            ultimos=ultimos,
-            backups=backups,
-            dashboard_stats=dashboard_stats,
-            quick_actions=quick_actions,
-        )
+        return render_template('dashboard.html', resumen=resumen, reporte=reporte, mes=mes, alertas=alertas, ultimos=ultimos, backups=backups)
 
     @app.route('/movimientos/export/<fmt>')
     @login_required
@@ -482,8 +411,11 @@ def create_app() -> Flask:
         """
         params: list[Any] = []
         if q:
-            sql += ' AND (nombre LIKE ? OR curso LIKE ?)'
             like = f'%{q}%'
+            if db.kind == 'postgres':
+                sql += " AND (nombre ILIKE ? OR COALESCE(curso, '') ILIKE ?)"
+            else:
+                sql += " AND (nombre LIKE ? OR COALESCE(curso, '') LIKE ?)"
             params.extend([like, like])
         sql += ' ORDER BY nombre'
         alumnos = db.fetchall(sql, params)
@@ -863,7 +795,10 @@ def obtener_movimientos_filtrados(db: DBAdapter, tipo: str = 'Todos', mes: str =
         params.append(mes)
     if q:
         like = f'%{q}%'
-        sql += ' AND (m.concepto LIKE ? OR m.observacion LIKE ? OR m.fecha LIKE ? OR m.origen LIKE ? OR COALESCE(a.nombre, "") LIKE ?)'
+        if db.kind == 'postgres':
+            sql += " AND (m.concepto ILIKE ? OR COALESCE(m.observacion, '') ILIKE ? OR m.fecha ILIKE ? OR m.origen ILIKE ? OR COALESCE(a.nombre, '') ILIKE ?)"
+        else:
+            sql += " AND (m.concepto LIKE ? OR COALESCE(m.observacion, '') LIKE ? OR m.fecha LIKE ? OR m.origen LIKE ? OR COALESCE(a.nombre, '') LIKE ?)"
         params.extend([like, like, like, like, like])
     sql += ' ORDER BY m.fecha DESC, m.id DESC'
     return db.fetchall(sql, params)
@@ -991,7 +926,7 @@ def obtener_nombre_alumno(db: DBAdapter, alumno_id: int) -> str:
 
 
 def alumno_duplicado(db: DBAdapter, nombre: str, curso: str, exclude_id: int | None = None) -> bool:
-    sql = 'SELECT id FROM alumnos WHERE lower(trim(nombre)) = lower(trim(?)) AND lower(trim(COALESCE(curso, ""))) = lower(trim(?))'
+    sql = "SELECT id FROM alumnos WHERE lower(trim(nombre)) = lower(trim(?)) AND lower(trim(COALESCE(curso, ''))) = lower(trim(?))"
     params: list[Any] = [nombre, curso or '']
     if exclude_id:
         sql += ' AND id <> ?'
