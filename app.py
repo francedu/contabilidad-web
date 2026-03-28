@@ -482,8 +482,8 @@ def create_app() -> Flask:
         """
         params: list[Any] = []
         if q:
-            sql += ' AND (nombre LIKE ? OR curso LIKE ?)'
-            like = f'%{q}%'
+            sql += " AND (LOWER(COALESCE(nombre, '')) LIKE ? OR LOWER(COALESCE(curso, '')) LIKE ?)"
+            like = sql_like_ci(q)
             params.extend([like, like])
         sql += ' ORDER BY nombre'
         alumnos = db.fetchall(sql, params)
@@ -576,10 +576,10 @@ def create_app() -> Flask:
                    COALESCE(a.nombre, '-') AS actividad
             FROM movimientos m
             LEFT JOIN actividades a ON a.id = m.actividad_id
-            WHERE m.origen = 'actividad_alumno' AND m.concepto LIKE ?
+            WHERE m.origen = 'actividad_alumno' AND LOWER(m.concepto) LIKE ?
             ORDER BY m.fecha DESC, m.id DESC
             """,
-            (f'Aporte actividad alumno: {alumno["nombre"]}%',),
+            (sql_like_ci(f'Aporte actividad alumno: {alumno["nombre"]}')[:-1] + '%',),
         )
         historial = sorted([dict(x) for x in historial_cuotas] + [dict(x) for x in historial_aportes], key=lambda x: (x['fecha'], x['id']), reverse=True)
         return render_template('alumno_detail.html', alumno=alumno, historial=historial)
@@ -839,11 +839,22 @@ def create_app() -> Flask:
         alertas = obtener_alertas_morosidad(db, mes)
         return render_template('cuotas.html', filas=filas, mes=mes, total_esperado=total_esperado, total_pagado=total_pagado, total_debe=total_debe, alertas=alertas)
 
+    @app.errorhandler(500)
+    def internal_server_error(exc):
+        app.logger.exception('Internal server error: %s', exc)
+        flash('Ocurrió un error interno. Revisa los filtros de búsqueda e inténtalo nuevamente.', 'danger')
+        destino = request.referrer or (url_for('dashboard') if current_user.is_authenticated else url_for('login'))
+        return redirect(destino)
+
     return app
 
 
 def is_postgres_url(url: str) -> bool:
     return url.startswith('postgresql://') or url.startswith('postgres://')
+
+
+def sql_like_ci(value: str) -> str:
+    return f"%{(value or '').strip().lower()}%"
 
 
 def obtener_movimientos_filtrados(db: DBAdapter, tipo: str = 'Todos', mes: str = '', q: str = ''):
@@ -862,8 +873,8 @@ def obtener_movimientos_filtrados(db: DBAdapter, tipo: str = 'Todos', mes: str =
         sql += ' AND substr(m.fecha, 1, 7) = ?'
         params.append(mes)
     if q:
-        like = f'%{q}%'
-        sql += ' AND (m.concepto LIKE ? OR m.observacion LIKE ? OR m.fecha LIKE ? OR m.origen LIKE ? OR COALESCE(a.nombre, "") LIKE ?)'
+        like = sql_like_ci(q)
+        sql += " AND (LOWER(COALESCE(m.concepto, '')) LIKE ? OR LOWER(COALESCE(m.observacion, '')) LIKE ? OR LOWER(COALESCE(m.fecha, '')) LIKE ? OR LOWER(COALESCE(m.origen, '')) LIKE ? OR LOWER(COALESCE(a.nombre, '')) LIKE ?)"
         params.extend([like, like, like, like, like])
     sql += ' ORDER BY m.fecha DESC, m.id DESC'
     return db.fetchall(sql, params)
@@ -991,7 +1002,7 @@ def obtener_nombre_alumno(db: DBAdapter, alumno_id: int) -> str:
 
 
 def alumno_duplicado(db: DBAdapter, nombre: str, curso: str, exclude_id: int | None = None) -> bool:
-    sql = 'SELECT id FROM alumnos WHERE lower(trim(nombre)) = lower(trim(?)) AND lower(trim(COALESCE(curso, ""))) = lower(trim(?))'
+    sql = "SELECT id FROM alumnos WHERE lower(trim(nombre)) = lower(trim(?)) AND lower(trim(COALESCE(curso, ''))) = lower(trim(?))"
     params: list[Any] = [nombre, curso or '']
     if exclude_id:
         sql += ' AND id <> ?'
