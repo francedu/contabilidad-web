@@ -1,8 +1,101 @@
 {% extends 'base.html' %}
 {% block title %}Actividades{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3"><h1 class="h3 mb-0">Actividades</h1>{% if current_user.can_edit() %}<a class="btn btn-primary" href="{{ url_for('actividades_new') }}">Nueva actividad</a>{% endif %}</div>
-<div class="card shadow-sm"><div class="card-body p-0"><div class="table-responsive"><table class="table table-hover mb-0 align-middle"><thead><tr><th>Nombre</th><th>Fecha</th><th>Descripción</th><th></th></tr></thead><tbody>
-{% for a in actividades %}<tr><td>{{ a['nombre'] }}</td><td>{{ a['fecha'] }}</td><td>{{ a['descripcion'] or '-' }}</td><td class="text-end">{% if current_user.can_edit() %}<div class="d-inline-flex gap-2"><a class="btn btn-sm btn-outline-primary" href="{{ url_for('actividades_edit', actividad_id=a['id']) }}">Editar</a><form method="post" action="{{ url_for('actividades_delete', actividad_id=a['id']) }}" onsubmit="return confirm('¿Eliminar la actividad {{ a['nombre'] }}? Los movimientos quedarán sin actividad asociada.');"><button class="btn btn-sm btn-outline-danger">Eliminar</button></form></div>{% endif %}</td></tr>{% else %}<tr><td colspan="4" class="text-center text-muted py-4">Sin actividades.</td></tr>{% endfor %}
-</tbody></table></div></div></div>
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h1 class="h3 mb-0">Actividades</h1>
+  {% if current_user.can_edit() %}<a class="btn btn-primary" href="{{ url_for('actividades_new') }}">Nueva actividad</a>{% endif %}
+</div>
+<div class="card shadow-sm">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0 align-middle">
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Fecha</th>
+            <th>Descripción</th>
+            <th class="text-end">Ingresos</th>
+            <th class="text-end">Gastos</th>
+            <th class="text-end">Balance</th>
+            <th class="text-center">Movs.</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for a in actividades %}
+          <tr>
+            <td class="fw-semibold">{{ a['nombre'] }}</td>
+            <td>{{ a['fecha'] }}</td>
+            <td>{{ a['descripcion'] or '-' }}</td>
+            <td class="text-end">{{ formato_monto(a['total_ingresos']) }}</td>
+            <td class="text-end">{{ formato_monto(a['total_gastos']) }}</td>
+            <td class="text-end">{{ formato_monto(a['total_ingresos'] - a['total_gastos']) }}</td>
+            <td class="text-center">{{ a['movimientos_count'] }}</td>
+            <td class="text-end">
+              <div class="d-inline-flex gap-2 flex-wrap justify-content-end">
+                {% if current_user.can_edit() %}
+                  <a class="btn btn-sm btn-outline-primary" href="{{ url_for('actividades_edit', actividad_id=a['id']) }}">Editar</a>
+                  <form method="post" action="{{ url_for('actividades_delete', actividad_id=a['id']) }}" onsubmit="return confirm('¿Eliminar la actividad {{ a['nombre'] }}? Los movimientos quedarán sin actividad asociada.');">
+                    <button class="btn btn-sm btn-outline-danger">Eliminar</button>
+                  </form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          <tr class="table-light">
+            <td colspan="8" class="p-0">
+              <div class="p-3 border-top">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                  <h2 class="h6 mb-0">Pagos y gastos relacionados</h2>
+                  <span class="badge text-bg-secondary">{{ a['movimientos_count'] }} movimientos</span>
+                </div>
+                {% if a['movimientos'] %}
+                  <div class="table-responsive">
+                    <table class="table table-sm table-striped align-middle mb-0">
+                      <thead>
+                        <tr>
+                          <th>Fecha</th>
+                          <th>Tipo</th>
+                          <th>Concepto</th>
+                          <th>Alumno</th>
+                          <th>Origen</th>
+                          <th>Observación</th>
+                          <th class="text-end">Monto</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                      {% for row in a['movimientos'] %}
+                        <tr>
+                          <td>{{ row['fecha'] }}</td>
+                          <td>{{ row['tipo'] }}</td>
+                          <td>{{ row['concepto'] }}</td>
+                          <td>
+                            {% if row['alumno_nombre'] %}
+                              {{ row['alumno_nombre'] }}{% if row['alumno_curso'] %} · {{ row['alumno_curso'] }}{% endif %}
+                            {% else %}
+                              -
+                            {% endif %}
+                          </td>
+                          <td>{{ row['origen'] }}</td>
+                          <td>{{ row['observacion'] or '-' }}</td>
+                          <td class="text-end">{{ formato_monto(row['monto']) }}</td>
+                        </tr>
+                      {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                {% else %}
+                  <div class="text-muted">No hay pagos o gastos relacionados con esta actividad.</div>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="8" class="text-center text-muted py-4">Sin actividades.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
 {% endblock %}

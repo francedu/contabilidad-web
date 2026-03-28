@@ -700,8 +700,76 @@ def create_app() -> Flask:
     @login_required
     def actividades_list():
         db = get_db()
-        actividades = db.fetchall('SELECT * FROM actividades ORDER BY fecha DESC, nombre')
+        actividades_rows = db.fetchall(
+            """
+            SELECT a.*,
+                   COALESCE(SUM(CASE WHEN m.tipo = 'ingreso' THEN m.monto ELSE 0 END), 0) AS total_ingresos,
+                   COALESCE(SUM(CASE WHEN m.tipo = 'gasto' THEN m.monto ELSE 0 END), 0) AS total_gastos,
+                   COUNT(m.id) AS movimientos_count
+            FROM actividades a
+            LEFT JOIN movimientos m ON m.actividad_id = a.id
+            GROUP BY a.id, a.nombre, a.fecha, a.descripcion
+            ORDER BY a.fecha DESC, a.nombre
+            """
+        )
+        movimientos_rows = db.fetchall(
+            """
+            SELECT m.id, m.actividad_id, m.fecha, m.tipo, m.concepto, m.monto, m.observacion, m.origen,
+                   COALESCE(al.nombre, '') AS alumno_nombre,
+                   COALESCE(al.curso, '') AS alumno_curso
+            FROM movimientos m
+            LEFT JOIN pagos_alumnos p ON p.movimiento_id = m.id
+            LEFT JOIN alumnos al ON al.id = p.alumno_id
+            WHERE m.actividad_id IS NOT NULL
+            ORDER BY m.fecha DESC, m.id DESC
+            """
+        )
+        movimientos_por_actividad: dict[int, list[dict[str, Any]]] = {}
+        for row in movimientos_rows:
+            actividad_id = row['actividad_id']
+            movimientos_por_actividad.setdefault(actividad_id, []).append(row)
+
+        actividades = []
+        for row in actividades_rows:
+            actividad = dict(row)
+            actividad['movimientos'] = movimientos_por_actividad.get(row['id'], [])
+            actividades.append(actividad)
         return render_template('actividades_list.html', actividades=actividades)
+
+    @app.route('/actividades/<int:actividad_id>')
+    @login_required
+    def actividad_detail(actividad_id: int):
+        db = get_db()
+        actividad = db.fetchone(
+            """
+            SELECT a.*,
+                   COALESCE(SUM(CASE WHEN m.tipo = 'ingreso' THEN m.monto ELSE 0 END), 0) AS total_ingresos,
+                   COALESCE(SUM(CASE WHEN m.tipo = 'gasto' THEN m.monto ELSE 0 END), 0) AS total_gastos,
+                   COUNT(m.id) AS movimientos_count
+            FROM actividades a
+            LEFT JOIN movimientos m ON m.actividad_id = a.id
+            WHERE a.id = ?
+            GROUP BY a.id, a.nombre, a.fecha, a.descripcion
+            """,
+            (actividad_id,),
+        )
+        if not actividad:
+            flash('Actividad no encontrada.', 'danger')
+            return redirect(url_for('actividades_list'))
+        movimientos = db.fetchall(
+            """
+            SELECT m.id, m.fecha, m.tipo, m.concepto, m.monto, m.observacion, m.origen,
+                   COALESCE(al.nombre, '') AS alumno_nombre,
+                   COALESCE(al.curso, '') AS alumno_curso
+            FROM movimientos m
+            LEFT JOIN pagos_alumnos p ON p.movimiento_id = m.id
+            LEFT JOIN alumnos al ON al.id = p.alumno_id
+            WHERE m.actividad_id = ?
+            ORDER BY m.fecha DESC, m.id DESC
+            """,
+            (actividad_id,),
+        )
+        return render_template('actividad_detail.html', actividad=actividad, movimientos=movimientos)
 
     @app.route('/actividades/nueva', methods=['GET', 'POST'])
     @role_required('admin', 'tesorero')
