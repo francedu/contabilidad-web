@@ -699,6 +699,7 @@ def create_app() -> Flask:
     def movimientos_new():
         db = get_db()
         actividades = db.fetchall('SELECT id, nombre, fecha FROM actividades ORDER BY fecha DESC, nombre')
+        redirect_next = request.form.get('next') or request.args.get('next')
         if request.method == 'POST':
             fecha = request.form.get('fecha', '').strip()
             tipo = request.form.get('tipo', 'ingreso').strip()
@@ -711,24 +712,37 @@ def create_app() -> Flask:
                 validar_fecha(fecha)
             except Exception:
                 flash('Fecha inválida.', 'danger')
-                return render_template('movimientos_form.html', actividades=actividades, movimiento=None)
+                return render_template('movimientos_form.html', actividades=actividades, movimiento=None, redirect_next=redirect_next)
             db.execute(
                 'INSERT INTO movimientos (fecha, tipo, concepto, monto, actividad_id, observacion, origen) VALUES (?, ?, ?, ?, ?, ?, ?)',
                 (fecha, tipo, concepto, monto, actividad_id, observacion, 'general'),
             )
             db.commit()
             flash('Movimiento creado.', 'success')
-            return redirect(url_for('movimientos_list'))
-        return render_template('movimientos_form.html', actividades=actividades, movimiento=None)
+            return redirect(redirect_next or url_for('movimientos_list'))
+
+        actividad_raw = request.args.get('actividad_id', '').strip()
+        actividad_id = int(actividad_raw) if actividad_raw.isdigit() else None
+        tipo_default = request.args.get('tipo', 'ingreso').strip() or 'ingreso'
+        movimiento = {
+            'fecha': datetime.now().strftime('%Y-%m-%d'),
+            'tipo': tipo_default,
+            'monto': '',
+            'actividad_id': actividad_id,
+            'concepto': '',
+            'observacion': '',
+        }
+        return render_template('movimientos_form.html', actividades=actividades, movimiento=movimiento, redirect_next=redirect_next)
 
     @app.route('/movimientos/<int:movimiento_id>/editar', methods=['GET', 'POST'])
     @role_required('admin', 'tesorero')
     def movimientos_edit(movimiento_id: int):
         db = get_db()
+        redirect_next = request.form.get('next') or request.args.get('next')
         movimiento = db.fetchone('SELECT * FROM movimientos WHERE id=?', (movimiento_id,))
         if not movimiento:
             flash('Movimiento no encontrado.', 'danger')
-            return redirect(url_for('movimientos_list'))
+            return redirect(redirect_next or url_for('movimientos_list'))
         actividades = db.fetchall('SELECT id, nombre, fecha FROM actividades ORDER BY fecha DESC, nombre')
         if request.method == 'POST':
             fecha = request.form.get('fecha', '').strip()
@@ -742,34 +756,77 @@ def create_app() -> Flask:
                 validar_fecha(fecha)
             except Exception:
                 flash('Fecha inválida.', 'danger')
-                return render_template('movimientos_form.html', actividades=actividades, movimiento=movimiento)
+                return render_template('movimientos_form.html', actividades=actividades, movimiento=movimiento, redirect_next=redirect_next)
             db.execute('UPDATE movimientos SET fecha=?, tipo=?, concepto=?, monto=?, actividad_id=?, observacion=? WHERE id=?',
                        (fecha, tipo, concepto, monto, actividad_id, observacion, movimiento_id))
             db.commit()
             flash('Movimiento actualizado.', 'success')
-            return redirect(url_for('movimientos_list'))
-        return render_template('movimientos_form.html', actividades=actividades, movimiento=movimiento)
+            return redirect(redirect_next or url_for('movimientos_list'))
+        return render_template('movimientos_form.html', actividades=actividades, movimiento=movimiento, redirect_next=redirect_next)
 
     @app.post('/movimientos/<int:movimiento_id>/eliminar')
     @role_required('admin', 'tesorero')
     def movimientos_delete(movimiento_id: int):
         db = get_db()
+        redirect_next = request.form.get('next') or request.args.get('next')
         movimiento = db.fetchone('SELECT concepto FROM movimientos WHERE id=?', (movimiento_id,))
         if not movimiento:
             flash('Movimiento no encontrado.', 'danger')
-            return redirect(url_for('movimientos_list'))
+            return redirect(redirect_next or url_for('movimientos_list'))
         db.execute('DELETE FROM pagos_alumnos WHERE movimiento_id = ?', (movimiento_id,))
         db.execute('DELETE FROM movimientos WHERE id = ?', (movimiento_id,))
         db.commit()
         flash(f'Movimiento eliminado: {movimiento["concepto"]}.', 'success')
-        return redirect(url_for('movimientos_list'))
+        return redirect(redirect_next or url_for('movimientos_list'))
 
     @app.route('/actividades')
     @login_required
     def actividades_list():
         db = get_db()
-        actividades = db.fetchall('SELECT * FROM actividades ORDER BY fecha DESC, nombre')
+        actividades = db.fetchall(
+            """
+            SELECT a.*, 
+                   COALESCE(SUM(CASE WHEN m.tipo = 'ingreso' THEN m.monto ELSE 0 END), 0) AS total_ingresos,
+                   COUNT(CASE WHEN m.tipo = 'ingreso' THEN 1 END) AS cantidad_ingresos
+            FROM actividades a
+            LEFT JOIN movimientos m ON m.actividad_id = a.id
+            GROUP BY a.id, a.nombre, a.fecha, a.descripcion
+            ORDER BY a.fecha DESC, a.nombre
+            """
+        )
         return render_template('actividades_list.html', actividades=actividades)
+
+    @app.route('/actividades/<int:actividad_id>')
+    @login_required
+    def actividad_detail(actividad_id: int):
+        db = get_db()
+        actividad = db.fetchone('SELECT * FROM actividades WHERE id=?', (actividad_id,))
+        if not actividad:
+            flash('Actividad no encontrada.', 'danger')
+            return redirect(url_for('actividades_list'))
+
+        resumen = db.fetchone(
+            """
+            SELECT
+                COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN monto ELSE 0 END), 0) AS ingresos,
+                COUNT(CASE WHEN tipo = 'ingreso' THEN 1 END) AS cantidad_ingresos,
+                COALESCE(SUM(CASE WHEN tipo = 'gasto' THEN monto ELSE 0 END), 0) AS gastos,
+                COUNT(CASE WHEN tipo = 'gasto' THEN 1 END) AS cantidad_gastos
+            FROM movimientos
+            WHERE actividad_id = ?
+            """,
+            (actividad_id,),
+        )
+        ingresos = db.fetchall(
+            """
+            SELECT m.id, m.fecha, m.concepto, m.monto, m.observacion, m.origen
+            FROM movimientos m
+            WHERE m.actividad_id = ? AND m.tipo = 'ingreso'
+            ORDER BY m.fecha DESC, m.id DESC
+            """,
+            (actividad_id,),
+        )
+        return render_template('actividad_detail.html', actividad=actividad, resumen=resumen, ingresos=ingresos)
 
     @app.route('/actividades/nueva', methods=['GET', 'POST'])
     @role_required('admin', 'tesorero')

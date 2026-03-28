@@ -3,6 +3,7 @@
 {% block content %}
 <h1 class="h3 mb-3">{{ 'Editar movimiento' if movimiento else 'Nuevo movimiento' }}</h1>
 <div class="card shadow-sm"><div class="card-body"><form method="post" class="row g-3">
+  {% if redirect_next %}<input type="hidden" name="next" value="{{ redirect_next }}">{% endif %}
   <div class="col-md-3"><label class="form-label">Fecha</label><input class="form-control" type="date" name="fecha" value="{{ movimiento['fecha'] if movimiento else now.strftime('%Y-%m-%d') }}" required></div>
   <div class="col-md-3"><label class="form-label">Tipo</label><select class="form-select" name="tipo"><option {% if movimiento and movimiento['tipo']=='ingreso' %}selected{% endif %}>ingreso</option><option {% if movimiento and movimiento['tipo']=='gasto' %}selected{% endif %}>gasto</option></select></div>
   <div class="col-md-3"><label class="form-label">Monto</label><input class="form-control" name="monto" value="{{ movimiento['monto'] if movimiento else '' }}" required></div>
