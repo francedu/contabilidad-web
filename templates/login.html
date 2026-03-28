@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block title %}Iniciar sesión{% endblock %}
+{% block content %}
+<div class="login-wrap">
+  <div class="card shadow login-card"><div class="card-body p-4">
+    <h1 class="h3 mb-1">Iniciar sesión</h1>
+    <p class="text-muted mb-4">{{ SCHOOL_NAME }} · {{ SCHOOL_LOCATION }}</p>
+    <form method="post" class="row g-3">
+      <div class="col-12"><label class="form-label">Usuario</label><input class="form-control" name="username" required autofocus></div>
+      <div class="col-12"><label class="form-label">Contraseña</label><input class="form-control" type="password" name="password" required></div>
+      <div class="col-12 d-grid"><button class="btn btn-primary">Entrar</button></div>
+    </form>
+    <div class="small text-muted mt-3">Acceso inicial: admin / admin123</div>
+  </div></div>
+</div>
+{% endblock %}

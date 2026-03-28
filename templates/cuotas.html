@@ -1,0 +1,11 @@
+{% extends 'base.html' %}
+{% block title %}Estado de cuotas{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3"><h1 class="h3 mb-0">Estado de cuotas</h1>{% if current_user.can_edit() %}<a class="btn btn-primary" href="{{ url_for('pagos_new') }}">Registrar pago</a>{% endif %}</div>
+<form class="row g-2 mb-3"><div class="col-md-3"><input class="form-control" name="mes" value="{{ mes }}" placeholder="YYYY-MM"></div><div class="col-auto"><button class="btn btn-outline-secondary">Consultar</button></div></form>
+<div class="row g-3 mb-3"><div class="col-md-4"><div class="card shadow-sm"><div class="card-body"><div class="text-muted small">Total esperado</div><div class="fs-5 fw-bold">{{ formato_monto(total_esperado) }}</div></div></div></div><div class="col-md-4"><div class="card shadow-sm"><div class="card-body"><div class="text-muted small">Total pagado</div><div class="fs-5 fw-bold">{{ formato_monto(total_pagado) }}</div></div></div></div><div class="col-md-4"><div class="card shadow-sm"><div class="card-body"><div class="text-muted small">Deuda total</div><div class="fs-5 fw-bold">{{ formato_monto(total_debe) }}</div></div></div></div></div>
+{% if alertas %}<div class="alert alert-warning">Hay {{ alertas|length }} alumno(s) con morosidad en {{ mes }}.</div>{% else %}<div class="alert alert-success">No hay morosidad en {{ mes }}.</div>{% endif %}
+<div class="card shadow-sm"><div class="card-body p-0"><div class="table-responsive"><table class="table table-striped mb-0 align-middle"><thead><tr><th>Alumno</th><th>Curso</th><th>Cuota</th><th>Pagado</th><th>Debe</th><th>Estado</th><th>Activo</th></tr></thead><tbody>
+{% for fila in filas %}{% set estado = estado_cuota(fila['cuota_mensual'], fila['pagado']) %}<tr><td><a href="{{ url_for('alumno_detail', alumno_id=fila['id']) }}">{{ fila['nombre'] }}</a></td><td>{{ fila['curso'] or '-' }}</td><td>{{ formato_monto(fila['cuota_mensual']) }}</td><td>{{ formato_monto(fila['pagado']) }}</td><td>{{ formato_monto([fila['cuota_mensual'] - fila['pagado'], 0]|max) }}</td><td><span class="state-pill">{{ estado[1] }} {{ estado[0] }}</span></td><td>{{ 'Sí' if fila['activo'] else 'No' }}</td></tr>{% endfor %}
+</tbody></table></div></div></div>
+{% endblock %}

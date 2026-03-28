@@ -1,0 +1,9 @@
+
+body { background: #f6f8fb; }
+.table td, .table th { vertical-align: middle; }
+.card { border: 0; border-radius: 1rem; }
+.navbar-brand { font-weight: 700; }
+.badge-role { font-size: .78rem; }
+.login-wrap { min-height: 100vh; display: grid; place-items: center; }
+.login-card { max-width: 420px; width: 100%; }
+.state-pill { border-radius: 999px; padding: .25rem .6rem; background: #f1f5f9; display: inline-block; }

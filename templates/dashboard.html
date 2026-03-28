@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Dashboard</h1>
+<div class="row g-3 mb-4">
+  <div class="col-md-4"><div class="card shadow-sm"><div class="card-body"><div class="text-muted small">Ingresos</div><div class="fs-4 fw-bold">{{ formato_monto(resumen['ingresos']) }}</div></div></div></div>
+  <div class="col-md-4"><div class="card shadow-sm"><div class="card-body"><div class="text-muted small">Gastos</div><div class="fs-4 fw-bold">{{ formato_monto(resumen['gastos']) }}</div></div></div></div>
+  <div class="col-md-4"><div class="card shadow-sm"><div class="card-body"><div class="text-muted small">Balance</div><div class="fs-4 fw-bold">{{ formato_monto((resumen['ingresos'] or 0) - (resumen['gastos'] or 0)) }}</div></div></div></div>
+</div>
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card shadow-sm"><div class="card-body"><h2 class="h5">Ingresos vs gastos por mes</h2><canvas id="chartMensual" height="120"></canvas></div></div>
+    <div class="card shadow-sm mt-4"><div class="card-body"><h2 class="h5">Últimos movimientos</h2>
+      <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Actividad</th><th class="text-end">Monto</th></tr></thead><tbody>
+      {% for row in ultimos %}<tr><td>{{ row['fecha'] }}</td><td><span class="badge text-bg-{{ 'success' if row['tipo']=='ingreso' else 'danger' }}">{{ row['tipo'] }}</span></td><td>{{ row['concepto'] }}</td><td>{{ row['actividad'] }}</td><td class="text-end">{{ formato_monto(row['monto']) }}</td></tr>{% endfor %}
+      </tbody></table></div>
+    </div></div>
+  </div>
+  <div class="col-lg-4">
+    {% if current_user.role == 'admin' %}<div class="card shadow-sm mb-4"><div class="card-body"><div class="d-flex justify-content-between align-items-center mb-2"><h2 class="h5 mb-0">Respaldos</h2><form method="post" action="{{ url_for('backups_create') }}"><button class="btn btn-sm btn-primary">Crear</button></form></div>{% if backups %}<div class="list-group list-group-flush">{% for b in backups %}<a class="list-group-item list-group-item-action d-flex justify-content-between" href="{{ url_for('backups_download', nombre=b['nombre']) }}"><span class="small">{{ b['nombre'] }}</span><span class="small text-muted">{{ '%.1f KB'|format(b['tamano']/1024) }}</span></a>{% endfor %}</div>{% else %}<div class="text-muted small">Aún no hay respaldos.</div>{% endif %}</div></div>{% endif %}
+    <div class="card shadow-sm"><div class="card-body">
+      <div class="d-flex justify-content-between align-items-center"><h2 class="h5">Alertas de morosidad</h2><a href="{{ url_for('cuotas_view', mes=mes) }}" class="btn btn-sm btn-outline-secondary">Ver mes</a></div>
+      <div class="text-muted small mb-3">Mes consultado: {{ mes }}</div>
+      {% if alertas %}<div class="list-group list-group-flush">{% for alerta in alertas[:6] %}<a class="list-group-item list-group-item-action" href="{{ url_for('alumno_detail', alumno_id=alerta['alumno_id']) }}"><div class="d-flex justify-content-between"><strong>{{ alerta['icono'] }} {{ alerta['nombre'] }}</strong><span>{{ formato_monto(alerta['debe']) }}</span></div><div class="small text-muted">{{ alerta['curso'] or 'Sin curso' }} · {{ alerta['estado'] }}</div></a>{% endfor %}</div>{% else %}<div class="alert alert-success mb-0">Sin alertas de morosidad.</div>{% endif %}
+    </div></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const labels = {{ reporte|map(attribute='mes')|list|tojson }};
+const ingresos = {{ reporte|map(attribute='ingresos')|list|tojson }};
+const gastos = {{ reporte|map(attribute='gastos')|list|tojson }};
+new Chart(document.getElementById('chartMensual'), {type:'bar',data:{labels,datasets:[{label:'Ingresos',data:ingresos},{label:'Gastos',data:gastos}]},options:{responsive:true,maintainAspectRatio:true}});
+</script>
+{% endblock %}

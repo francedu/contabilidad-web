@@ -1,0 +1,8 @@
+{% extends 'base.html' %}
+{% block title %}Historial alumno{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3"><div><h1 class="h3 mb-0">{{ alumno['nombre'] }}</h1><div class="text-muted">{{ alumno['curso'] or 'Sin curso' }} · Cuota {{ formato_monto(alumno['cuota_mensual']) }}</div></div>{% if current_user.can_edit() %}<a class="btn btn-outline-primary" href="{{ url_for('alumnos_edit', alumno_id=alumno['id']) }}">Editar</a>{% endif %}</div>
+<div class="card shadow-sm"><div class="card-body p-0"><div class="table-responsive"><table class="table table-striped mb-0 align-middle"><thead><tr><th>Fecha</th><th>Mes</th><th>Tipo</th><th>Actividad</th><th>Observación</th><th class="text-end">Monto</th></tr></thead><tbody>
+{% for row in historial %}<tr><td>{{ row['fecha'] }}</td><td>{{ row['mes'] }}</td><td>{{ row['tipo'] }}</td><td>{{ row['actividad'] or '-' }}</td><td>{{ row['observacion'] or '-' }}</td><td class="text-end">{{ formato_monto(row['monto']) }}</td></tr>{% else %}<tr><td colspan="6" class="text-center text-muted py-4">Sin historial registrado.</td></tr>{% endfor %}
+</tbody></table></div></div></div>
+{% endblock %}
