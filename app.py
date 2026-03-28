@@ -778,7 +778,13 @@ def create_app() -> Flask:
     @login_required
     def actividades_list():
         db = get_db()
-        actividades = db.fetchall('SELECT * FROM actividades ORDER BY fecha DESC, nombre')
+        actividades = db.fetchall(
+            """
+            SELECT id, nombre, fecha, COALESCE(descripcion, '') AS descripcion
+            FROM actividades
+            ORDER BY fecha DESC, nombre
+            """
+        )
         return render_template('actividades_list.html', actividades=actividades)
 
     @app.route('/actividades/nueva', methods=['GET', 'POST'])
@@ -1219,10 +1225,20 @@ def init_db(db: DBAdapter) -> None:
         CREATE UNIQUE INDEX IF NOT EXISTS idx_pagos_alumno_mes_unique ON pagos_alumnos(alumno_id, mes);
         """
     db.executescript(script)
-    try:
-        db.execute('ALTER TABLE movimientos ADD COLUMN alumno_id BIGINT')
-    except Exception:
-        pass
+
+    # Migraciones suaves para bases existentes creadas con versiones anteriores.
+    for statement in [
+        'ALTER TABLE actividades ADD COLUMN descripcion TEXT',
+        'ALTER TABLE movimientos ADD COLUMN actividad_id BIGINT',
+        'ALTER TABLE movimientos ADD COLUMN alumno_id BIGINT',
+        "ALTER TABLE movimientos ADD COLUMN origen TEXT NOT NULL DEFAULT 'general'",
+        'ALTER TABLE pagos_alumnos ADD COLUMN observacion TEXT',
+        'ALTER TABLE pagos_alumnos ADD COLUMN movimiento_id BIGINT',
+    ]:
+        try:
+            db.execute(statement)
+        except Exception:
+            pass
     db.commit()
 
 
