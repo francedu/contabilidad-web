@@ -3,12 +3,12 @@
 {% block content %}
 <h1 class="h3 mb-3">{{ 'Editar movimiento' if movimiento else 'Nuevo movimiento' }}</h1>
 <div class="card shadow-sm"><div class="card-body"><form method="post" class="row g-3">
-  {% if redirect_next %}<input type="hidden" name="next" value="{{ redirect_next }}">{% endif %}
   <div class="col-md-3"><label class="form-label">Fecha</label><input class="form-control" type="date" name="fecha" value="{{ movimiento['fecha'] if movimiento else now.strftime('%Y-%m-%d') }}" required></div>
   <div class="col-md-3"><label class="form-label">Tipo</label><select class="form-select" name="tipo"><option {% if movimiento and movimiento['tipo']=='ingreso' %}selected{% endif %}>ingreso</option><option {% if movimiento and movimiento['tipo']=='gasto' %}selected{% endif %}>gasto</option></select></div>
   <div class="col-md-3"><label class="form-label">Monto</label><input class="form-control" name="monto" value="{{ movimiento['monto'] if movimiento else '' }}" required></div>
   <div class="col-md-3"><label class="form-label">Actividad</label><select class="form-select" name="actividad_id"><option value="">Sin actividad</option>{% for a in actividades %}<option value="{{ a['id'] }}" {% if movimiento and movimiento['actividad_id']==a['id'] %}selected{% endif %}>{{ a['nombre'] }} ({{ a['fecha'] }})</option>{% endfor %}</select></div>
-  <div class="col-12"><label class="form-label">Concepto</label><input class="form-control" name="concepto" value="{{ movimiento['concepto'] if movimiento else '' }}" required></div>
+  <div class="col-md-6"><label class="form-label">Alumno relacionado (opcional)</label><select class="form-select" name="alumno_id"><option value="">Sin alumno asociado</option>{% for alumno in alumnos %}<option value="{{ alumno['id'] }}" {% if movimiento and movimiento['alumno_id']==alumno['id'] %}selected{% endif %}>{{ alumno['nombre'] }}{% if alumno['curso'] %} ({{ alumno['curso'] }}){% endif %}</option>{% endfor %}</select><div class="form-text">Úsalo cuando el ingreso de actividad corresponda a un alumno existente.</div></div>
+  <div class="col-md-6"><label class="form-label">Concepto</label><input class="form-control" name="concepto" value="{{ movimiento['concepto'] if movimiento else '' }}" required></div>
   <div class="col-12"><label class="form-label">Observación</label><textarea class="form-control" name="observacion" rows="3">{{ movimiento['observacion'] if movimiento else '' }}</textarea></div>
   <div class="col-12 d-flex gap-2"><button class="btn btn-primary">Guardar</button><a class="btn btn-outline-secondary" href="{{ url_for('movimientos_list') }}">Cancelar</a></div>
 </form></div></div>

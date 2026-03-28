@@ -342,18 +342,18 @@ def create_app() -> Flask:
         if fmt == 'csv':
             sio = StringIO()
             writer = csv.writer(sio)
-            writer.writerow(['ID', 'Fecha', 'Tipo', 'Concepto', 'Actividad', 'Origen', 'Monto', 'Observación'])
+            writer.writerow(['ID', 'Fecha', 'Tipo', 'Concepto', 'Actividad', 'Alumno', 'Origen', 'Monto', 'Observación'])
             for row in movimientos:
-                writer.writerow([row['id'], row['fecha'], row['tipo'], row['concepto'], row['actividad'], row['origen'], row['monto'], row['observacion']])
+                writer.writerow([row['id'], row['fecha'], row['tipo'], row['concepto'], row['actividad'], row.get('alumno', '-'), row['origen'], row['monto'], row['observacion']])
             data = BytesIO(sio.getvalue().encode('utf-8-sig'))
             return send_file(data, mimetype='text/csv', as_attachment=True, download_name=f'{nombre}.csv')
         if fmt == 'xlsx':
             wb = Workbook()
             ws = wb.active
             ws.title = 'Movimientos'
-            ws.append(['ID', 'Fecha', 'Tipo', 'Concepto', 'Actividad', 'Origen', 'Monto', 'Observación'])
+            ws.append(['ID', 'Fecha', 'Tipo', 'Concepto', 'Actividad', 'Alumno', 'Origen', 'Monto', 'Observación'])
             for row in movimientos:
-                ws.append([row['id'], row['fecha'], row['tipo'], row['concepto'], row['actividad'], row['origen'], float(row['monto']), row['observacion']])
+                ws.append([row['id'], row['fecha'], row['tipo'], row['concepto'], row['actividad'], row.get('alumno', '-'), row['origen'], float(row['monto']), row['observacion']])
             for cell in ws[1]:
                 cell.font = cell.font.copy(bold=True)
             for column in ['A','B','C','D','E','F','G','H']:
@@ -576,10 +576,14 @@ def create_app() -> Flask:
                    COALESCE(a.nombre, '-') AS actividad
             FROM movimientos m
             LEFT JOIN actividades a ON a.id = m.actividad_id
-            WHERE m.origen = 'actividad_alumno' AND LOWER(m.concepto) LIKE ?
+            WHERE m.origen = 'actividad_alumno'
+              AND (
+                    m.alumno_id = ?
+                    OR (m.alumno_id IS NULL AND LOWER(m.concepto) LIKE ?)
+                  )
             ORDER BY m.fecha DESC, m.id DESC
             """,
-            (sql_like_ci(f'Aporte actividad alumno: {alumno["nombre"]}')[:-1] + '%',),
+            (alumno_id, sql_like_ci(f'Aporte actividad alumno: {alumno["nombre"]}')[:-1] + '%'),
         )
         historial = sorted([dict(x) for x in historial_cuotas] + [dict(x) for x in historial_aportes], key=lambda x: (x['fecha'], x['id']), reverse=True)
         return render_template('alumno_detail.html', alumno=alumno, historial=historial)
@@ -662,8 +666,8 @@ def create_app() -> Flask:
             else:
                 db.execute('UPDATE pagos_alumnos SET alumno_id=?, fecha=?, mes=?, monto=?, observacion=? WHERE id=?',
                            (alumno_id, fecha, mes, monto, observacion, pago_id))
-                db.execute('UPDATE movimientos SET fecha=?, concepto=?, monto=?, observacion=? WHERE id=?',
-                           (fecha, f'Cuota mensual alumno: {obtener_nombre_alumno(db, alumno_id)} ({mes})', monto, observacion, pago['movimiento_id']))
+                db.execute('UPDATE movimientos SET fecha=?, concepto=?, monto=?, alumno_id=?, observacion=? WHERE id=?',
+                           (fecha, f'Cuota mensual alumno: {obtener_nombre_alumno(db, alumno_id)} ({mes})', monto, alumno_id, observacion, pago['movimiento_id']))
                 db.commit()
                 flash('Pago actualizado.', 'success')
                 return redirect(url_for('pagos_list'))
@@ -699,7 +703,7 @@ def create_app() -> Flask:
     def movimientos_new():
         db = get_db()
         actividades = db.fetchall('SELECT id, nombre, fecha FROM actividades ORDER BY fecha DESC, nombre')
-        redirect_next = request.form.get('next') or request.args.get('next')
+        alumnos = db.fetchall('SELECT id, nombre, curso FROM alumnos WHERE activo = 1 ORDER BY nombre')
         if request.method == 'POST':
             fecha = request.form.get('fecha', '').strip()
             tipo = request.form.get('tipo', 'ingreso').strip()
@@ -707,43 +711,33 @@ def create_app() -> Flask:
             monto = parse_float(request.form.get('monto', '0'))
             actividad_raw = request.form.get('actividad_id', '').strip()
             actividad_id = int(actividad_raw) if actividad_raw else None
+            alumno_raw = request.form.get('alumno_id', '').strip()
+            alumno_id = int(alumno_raw) if alumno_raw else None
             observacion = request.form.get('observacion', '').strip()
             try:
                 validar_fecha(fecha)
             except Exception:
                 flash('Fecha inválida.', 'danger')
-                return render_template('movimientos_form.html', actividades=actividades, movimiento=None, redirect_next=redirect_next)
+                return render_template('movimientos_form.html', actividades=actividades, alumnos=alumnos, movimiento=None)
             db.execute(
-                'INSERT INTO movimientos (fecha, tipo, concepto, monto, actividad_id, observacion, origen) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                (fecha, tipo, concepto, monto, actividad_id, observacion, 'general'),
+                'INSERT INTO movimientos (fecha, tipo, concepto, monto, actividad_id, alumno_id, observacion, origen) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                (fecha, tipo, concepto, monto, actividad_id, alumno_id, observacion, 'general'),
             )
             db.commit()
             flash('Movimiento creado.', 'success')
-            return redirect(redirect_next or url_for('movimientos_list'))
-
-        actividad_raw = request.args.get('actividad_id', '').strip()
-        actividad_id = int(actividad_raw) if actividad_raw.isdigit() else None
-        tipo_default = request.args.get('tipo', 'ingreso').strip() or 'ingreso'
-        movimiento = {
-            'fecha': datetime.now().strftime('%Y-%m-%d'),
-            'tipo': tipo_default,
-            'monto': '',
-            'actividad_id': actividad_id,
-            'concepto': '',
-            'observacion': '',
-        }
-        return render_template('movimientos_form.html', actividades=actividades, movimiento=movimiento, redirect_next=redirect_next)
+            return redirect(url_for('movimientos_list'))
+        return render_template('movimientos_form.html', actividades=actividades, alumnos=alumnos, movimiento=None)
 
     @app.route('/movimientos/<int:movimiento_id>/editar', methods=['GET', 'POST'])
     @role_required('admin', 'tesorero')
     def movimientos_edit(movimiento_id: int):
         db = get_db()
-        redirect_next = request.form.get('next') or request.args.get('next')
         movimiento = db.fetchone('SELECT * FROM movimientos WHERE id=?', (movimiento_id,))
         if not movimiento:
             flash('Movimiento no encontrado.', 'danger')
-            return redirect(redirect_next or url_for('movimientos_list'))
+            return redirect(url_for('movimientos_list'))
         actividades = db.fetchall('SELECT id, nombre, fecha FROM actividades ORDER BY fecha DESC, nombre')
+        alumnos = db.fetchall('SELECT id, nombre, curso FROM alumnos WHERE activo = 1 OR id = ? ORDER BY nombre', (movimiento['alumno_id'] or 0,))
         if request.method == 'POST':
             fecha = request.form.get('fecha', '').strip()
             tipo = request.form.get('tipo', 'ingreso').strip()
@@ -751,82 +745,41 @@ def create_app() -> Flask:
             monto = parse_float(request.form.get('monto', '0'))
             actividad_raw = request.form.get('actividad_id', '').strip()
             actividad_id = int(actividad_raw) if actividad_raw else None
+            alumno_raw = request.form.get('alumno_id', '').strip()
+            alumno_id = int(alumno_raw) if alumno_raw else None
             observacion = request.form.get('observacion', '').strip()
             try:
                 validar_fecha(fecha)
             except Exception:
                 flash('Fecha inválida.', 'danger')
-                return render_template('movimientos_form.html', actividades=actividades, movimiento=movimiento, redirect_next=redirect_next)
-            db.execute('UPDATE movimientos SET fecha=?, tipo=?, concepto=?, monto=?, actividad_id=?, observacion=? WHERE id=?',
-                       (fecha, tipo, concepto, monto, actividad_id, observacion, movimiento_id))
+                return render_template('movimientos_form.html', actividades=actividades, alumnos=alumnos, movimiento=movimiento)
+            db.execute('UPDATE movimientos SET fecha=?, tipo=?, concepto=?, monto=?, actividad_id=?, alumno_id=?, observacion=? WHERE id=?',
+                       (fecha, tipo, concepto, monto, actividad_id, alumno_id, observacion, movimiento_id))
             db.commit()
             flash('Movimiento actualizado.', 'success')
-            return redirect(redirect_next or url_for('movimientos_list'))
-        return render_template('movimientos_form.html', actividades=actividades, movimiento=movimiento, redirect_next=redirect_next)
+            return redirect(url_for('movimientos_list'))
+        return render_template('movimientos_form.html', actividades=actividades, alumnos=alumnos, movimiento=movimiento)
 
     @app.post('/movimientos/<int:movimiento_id>/eliminar')
     @role_required('admin', 'tesorero')
     def movimientos_delete(movimiento_id: int):
         db = get_db()
-        redirect_next = request.form.get('next') or request.args.get('next')
         movimiento = db.fetchone('SELECT concepto FROM movimientos WHERE id=?', (movimiento_id,))
         if not movimiento:
             flash('Movimiento no encontrado.', 'danger')
-            return redirect(redirect_next or url_for('movimientos_list'))
+            return redirect(url_for('movimientos_list'))
         db.execute('DELETE FROM pagos_alumnos WHERE movimiento_id = ?', (movimiento_id,))
         db.execute('DELETE FROM movimientos WHERE id = ?', (movimiento_id,))
         db.commit()
         flash(f'Movimiento eliminado: {movimiento["concepto"]}.', 'success')
-        return redirect(redirect_next or url_for('movimientos_list'))
+        return redirect(url_for('movimientos_list'))
 
     @app.route('/actividades')
     @login_required
     def actividades_list():
         db = get_db()
-        actividades = db.fetchall(
-            """
-            SELECT a.*, 
-                   COALESCE(SUM(CASE WHEN m.tipo = 'ingreso' THEN m.monto ELSE 0 END), 0) AS total_ingresos,
-                   COUNT(CASE WHEN m.tipo = 'ingreso' THEN 1 END) AS cantidad_ingresos
-            FROM actividades a
-            LEFT JOIN movimientos m ON m.actividad_id = a.id
-            GROUP BY a.id, a.nombre, a.fecha, a.descripcion
-            ORDER BY a.fecha DESC, a.nombre
-            """
-        )
+        actividades = db.fetchall('SELECT * FROM actividades ORDER BY fecha DESC, nombre')
         return render_template('actividades_list.html', actividades=actividades)
-
-    @app.route('/actividades/<int:actividad_id>')
-    @login_required
-    def actividad_detail(actividad_id: int):
-        db = get_db()
-        actividad = db.fetchone('SELECT * FROM actividades WHERE id=?', (actividad_id,))
-        if not actividad:
-            flash('Actividad no encontrada.', 'danger')
-            return redirect(url_for('actividades_list'))
-
-        resumen = db.fetchone(
-            """
-            SELECT
-                COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN monto ELSE 0 END), 0) AS ingresos,
-                COUNT(CASE WHEN tipo = 'ingreso' THEN 1 END) AS cantidad_ingresos,
-                COALESCE(SUM(CASE WHEN tipo = 'gasto' THEN monto ELSE 0 END), 0) AS gastos,
-                COUNT(CASE WHEN tipo = 'gasto' THEN 1 END) AS cantidad_gastos
-            FROM movimientos
-            WHERE actividad_id = ?
-            """,
-            (actividad_id,),
-        )
-        ingresos = db.fetchall(
-            """
-            SELECT m.id, m.fecha, m.concepto, m.monto, m.observacion, m.origen
-            FROM movimientos m
-            WHERE m.actividad_id = ? AND m.tipo = 'ingreso'
-            ORDER BY m.fecha DESC, m.id DESC
-            """,
-            (actividad_id,),
-        )
-        return render_template('actividad_detail.html', actividad=actividad, resumen=resumen, ingresos=ingresos)
 
     @app.route('/actividades/nueva', methods=['GET', 'POST'])
     @role_required('admin', 'tesorero')
@@ -917,9 +870,11 @@ def sql_like_ci(value: str) -> str:
 def obtener_movimientos_filtrados(db: DBAdapter, tipo: str = 'Todos', mes: str = '', q: str = ''):
     sql = """
         SELECT m.id, m.fecha, m.tipo, m.concepto, m.monto, COALESCE(a.nombre, '-') AS actividad,
+               COALESCE(al.nombre, '-') AS alumno,
                COALESCE(m.origen, 'general') AS origen, COALESCE(m.observacion, '') AS observacion
         FROM movimientos m
         LEFT JOIN actividades a ON a.id = m.actividad_id
+        LEFT JOIN alumnos al ON al.id = m.alumno_id
         WHERE 1=1
     """
     params: list[Any] = []
@@ -931,8 +886,8 @@ def obtener_movimientos_filtrados(db: DBAdapter, tipo: str = 'Todos', mes: str =
         params.append(mes)
     if q:
         like = sql_like_ci(q)
-        sql += " AND (LOWER(COALESCE(m.concepto, '')) LIKE ? OR LOWER(COALESCE(m.observacion, '')) LIKE ? OR LOWER(COALESCE(m.fecha, '')) LIKE ? OR LOWER(COALESCE(m.origen, '')) LIKE ? OR LOWER(COALESCE(a.nombre, '')) LIKE ?)"
-        params.extend([like, like, like, like, like])
+        sql += " AND (LOWER(COALESCE(m.concepto, '')) LIKE ? OR LOWER(COALESCE(m.observacion, '')) LIKE ? OR LOWER(COALESCE(m.fecha, '')) LIKE ? OR LOWER(COALESCE(m.origen, '')) LIKE ? OR LOWER(COALESCE(a.nombre, '')) LIKE ? OR LOWER(COALESCE(al.nombre, '')) LIKE ? OR LOWER(COALESCE(al.curso, '')) LIKE ?)"
+        params.extend([like, like, like, like, like, like, like])
     sql += ' ORDER BY m.fecha DESC, m.id DESC'
     return db.fetchall(sql, params)
 
@@ -950,13 +905,13 @@ def exportar_movimientos_pdf(movimientos, school_name: str, school_location: str
     total_ing = sum(float(r['monto']) for r in movimientos if r['tipo'] == 'ingreso')
     total_gas = sum(float(r['monto']) for r in movimientos if r['tipo'] == 'gasto')
     elems.append(Paragraph(f'Registros: {len(movimientos)} · Ingresos: {formato_monto(total_ing)} · Gastos: {formato_monto(total_gas)} · Balance: {formato_monto(total_ing-total_gas)}', styles['Heading3']))
-    table_data = [['Fecha', 'Tipo', 'Concepto', 'Actividad', 'Origen', 'Monto']]
+    table_data = [['Fecha', 'Tipo', 'Concepto', 'Actividad', 'Alumno', 'Origen', 'Monto']]
     for row in movimientos:
         concepto = str(row['concepto'])
         if len(concepto) > 38:
             concepto = concepto[:35] + '...'
-        table_data.append([row['fecha'], row['tipo'], concepto, row['actividad'], row['origen'], formato_monto(row['monto'])])
-    table = Table(table_data, repeatRows=1, colWidths=[28*mm, 24*mm, 95*mm, 55*mm, 36*mm, 28*mm])
+        table_data.append([row['fecha'], row['tipo'], concepto, row['actividad'], row.get('alumno', '-'), row['origen'], formato_monto(row['monto'])])
+    table = Table(table_data, repeatRows=1, colWidths=[24*mm, 20*mm, 78*mm, 42*mm, 42*mm, 30*mm, 24*mm])
     table.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#dfe7ff')),
         ('TEXTCOLOR', (0,0), (-1,0), colors.black),
@@ -1080,14 +1035,14 @@ def registrar_pago_alumno(db: DBAdapter, alumno_id: int, fecha: str, mes: str, m
         concepto = f'Cuota mensual alumno: {alumno["nombre"]} ({mes})'
         if db.kind == 'postgres':
             cur = db.execute(
-                'INSERT INTO movimientos (fecha, tipo, concepto, monto, actividad_id, observacion, origen) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id',
-                (fecha, 'ingreso', concepto, monto, None, observacion, 'cuota_mensual'),
+                'INSERT INTO movimientos (fecha, tipo, concepto, monto, actividad_id, alumno_id, observacion, origen) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
+                (fecha, 'ingreso', concepto, monto, None, alumno_id, observacion, 'cuota_mensual'),
             )
             movimiento_id = cur.fetchone()['id']
         else:
             cur = db.execute(
-                'INSERT INTO movimientos (fecha, tipo, concepto, monto, actividad_id, observacion, origen) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                (fecha, 'ingreso', concepto, monto, None, observacion, 'cuota_mensual'),
+                'INSERT INTO movimientos (fecha, tipo, concepto, monto, actividad_id, alumno_id, observacion, origen) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                (fecha, 'ingreso', concepto, monto, None, alumno_id, observacion, 'cuota_mensual'),
             )
             movimiento_id = cur.lastrowid
         db.execute(
@@ -1098,8 +1053,8 @@ def registrar_pago_alumno(db: DBAdapter, alumno_id: int, fecha: str, mes: str, m
         concepto = f'Aporte actividad alumno: {alumno["nombre"]}'
         detalle = observacion if observacion else f'Aporte para actividad registrado en {mes}'
         db.execute(
-            'INSERT INTO movimientos (fecha, tipo, concepto, monto, actividad_id, observacion, origen) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            (fecha, 'ingreso', concepto, monto, actividad_id, detalle, 'actividad_alumno'),
+            'INSERT INTO movimientos (fecha, tipo, concepto, monto, actividad_id, alumno_id, observacion, origen) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            (fecha, 'ingreso', concepto, monto, actividad_id, alumno_id, detalle, 'actividad_alumno'),
         )
 
 
@@ -1167,6 +1122,7 @@ def init_db(db: DBAdapter) -> None:
             concepto TEXT NOT NULL,
             monto DOUBLE PRECISION NOT NULL CHECK(monto >= 0),
             actividad_id BIGINT,
+            alumno_id BIGINT,
             observacion TEXT,
             origen TEXT NOT NULL DEFAULT 'general',
             CONSTRAINT fk_mov_actividad FOREIGN KEY (actividad_id) REFERENCES actividades(id)
@@ -1222,6 +1178,7 @@ def init_db(db: DBAdapter) -> None:
             concepto TEXT NOT NULL,
             monto REAL NOT NULL CHECK(monto >= 0),
             actividad_id INTEGER,
+            alumno_id INTEGER,
             observacion TEXT,
             origen TEXT NOT NULL DEFAULT 'general',
             FOREIGN KEY (actividad_id) REFERENCES actividades(id)
@@ -1262,6 +1219,10 @@ def init_db(db: DBAdapter) -> None:
         CREATE UNIQUE INDEX IF NOT EXISTS idx_pagos_alumno_mes_unique ON pagos_alumnos(alumno_id, mes);
         """
     db.executescript(script)
+    try:
+        db.execute('ALTER TABLE movimientos ADD COLUMN alumno_id BIGINT')
+    except Exception:
+        pass
     db.commit()
 
 
