@@ -4,7 +4,7 @@ Se aplicó un rediseño del dashboard con foco en lectura rápida y menos clics.
 
 ## Cambios
 - Hero superior con selector de mes visible.
-- Tarjetas KPI para balance total, balance mensual, deuda y alumnos activos.
+- Tarjetas KPI para saldo disponible en cuenta, balance mensual, deuda y alumnos activos.
 - Accesos rápidos a pago, ingreso, gasto y estado de cuotas.
 - Indicador visual de cumplimiento de cuotas del mes.
 - Panel de alertas de morosidad con mejor jerarquía visual.

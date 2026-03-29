@@ -725,9 +725,8 @@ def create_app() -> Flask:
             )
             db.commit()
             flash('Movimiento creado.', 'success')
-            next_url = request.form.get('next', '').strip()
-            return redirect(next_url or url_for('movimientos_list'))
-        return render_template('movimientos_form.html', actividades=actividades, alumnos=alumnos, movimiento=None, next_url=request.args.get('next', ''))
+            return redirect(url_for('movimientos_list'))
+        return render_template('movimientos_form.html', actividades=actividades, alumnos=alumnos, movimiento=None)
 
     @app.route('/movimientos/<int:movimiento_id>/editar', methods=['GET', 'POST'])
     @role_required('admin', 'tesorero')
@@ -758,9 +757,8 @@ def create_app() -> Flask:
                        (fecha, tipo, concepto, monto, actividad_id, alumno_id, observacion, movimiento_id))
             db.commit()
             flash('Movimiento actualizado.', 'success')
-            next_url = request.form.get('next', '').strip()
-            return redirect(next_url or url_for('movimientos_list'))
-        return render_template('movimientos_form.html', actividades=actividades, alumnos=alumnos, movimiento=movimiento, next_url=request.args.get('next', ''))
+            return redirect(url_for('movimientos_list'))
+        return render_template('movimientos_form.html', actividades=actividades, alumnos=alumnos, movimiento=movimiento)
 
     @app.post('/movimientos/<int:movimiento_id>/eliminar')
     @role_required('admin', 'tesorero')
@@ -774,8 +772,7 @@ def create_app() -> Flask:
         db.execute('DELETE FROM movimientos WHERE id = ?', (movimiento_id,))
         db.commit()
         flash(f'Movimiento eliminado: {movimiento["concepto"]}.', 'success')
-        next_url = request.form.get('next', '').strip()
-        return redirect(next_url or url_for('movimientos_list'))
+        return redirect(url_for('movimientos_list'))
 
     @app.route('/actividades')
     @login_required
@@ -783,79 +780,12 @@ def create_app() -> Flask:
         db = get_db()
         actividades = db.fetchall(
             """
-            SELECT
-                a.id,
-                a.nombre,
-                a.fecha,
-                COALESCE(a.descripcion, '') AS descripcion,
-                COALESCE(SUM(CASE WHEN m.tipo = 'ingreso' THEN m.monto ELSE 0 END), 0) AS ingresos,
-                COALESCE(SUM(CASE WHEN m.tipo = 'gasto' THEN m.monto ELSE 0 END), 0) AS egresos,
-                COALESCE(SUM(CASE WHEN m.tipo = 'ingreso' THEN 1 ELSE 0 END), 0) AS cantidad_ingresos,
-                COALESCE(SUM(CASE WHEN m.tipo = 'gasto' THEN 1 ELSE 0 END), 0) AS cantidad_egresos
-            FROM actividades a
-            LEFT JOIN movimientos m ON m.actividad_id = a.id
-            GROUP BY a.id, a.nombre, a.fecha, a.descripcion
-            ORDER BY a.fecha DESC, a.nombre
-            """
-        )
-        resumen_general = {
-            'ingresos': sum(float(a['ingresos'] or 0) for a in actividades),
-            'egresos': sum(float(a['egresos'] or 0) for a in actividades),
-            'cantidad_actividades': len(actividades),
-        }
-        resumen_general['balance'] = resumen_general['ingresos'] - resumen_general['egresos']
-        return render_template('actividades_list.html', actividades=actividades, resumen_general=resumen_general)
-
-    @app.route('/actividades/<int:actividad_id>')
-    @login_required
-    def actividad_detail(actividad_id: int):
-        db = get_db()
-        actividad = db.fetchone(
-            """
             SELECT id, nombre, fecha, COALESCE(descripcion, '') AS descripcion
             FROM actividades
-            WHERE id = ?
+            ORDER BY fecha DESC, nombre
             """
-            , (actividad_id,)
         )
-        if not actividad:
-            flash('Actividad no encontrada.', 'danger')
-            return redirect(url_for('actividades_list'))
-
-        resumen = db.fetchone(
-            """
-            SELECT
-                COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN monto ELSE 0 END), 0) AS ingresos,
-                COALESCE(SUM(CASE WHEN tipo = 'gasto' THEN monto ELSE 0 END), 0) AS gastos,
-                COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN 1 ELSE 0 END), 0) AS cantidad_ingresos,
-                COALESCE(SUM(CASE WHEN tipo = 'gasto' THEN 1 ELSE 0 END), 0) AS cantidad_gastos
-            FROM movimientos
-            WHERE actividad_id = ?
-            """
-            , (actividad_id,)
-        )
-        ingresos = db.fetchall(
-            """
-            SELECT m.id, m.fecha, m.concepto, m.monto, COALESCE(m.observacion, '') AS observacion,
-                   COALESCE(m.origen, 'general') AS origen, COALESCE(al.nombre, '-') AS alumno
-            FROM movimientos m
-            LEFT JOIN alumnos al ON al.id = m.alumno_id
-            WHERE m.actividad_id = ? AND m.tipo = 'ingreso'
-            ORDER BY m.fecha DESC, m.id DESC
-            """
-            , (actividad_id,)
-        )
-        gastos = db.fetchall(
-            """
-            SELECT m.id, m.fecha, m.concepto, m.monto, COALESCE(m.observacion, '') AS observacion,
-                   COALESCE(m.origen, 'general') AS origen
-            FROM movimientos m
-            WHERE m.actividad_id = ? AND m.tipo = 'gasto'
-            ORDER BY m.fecha DESC, m.id DESC
-            """
-            , (actividad_id,)
-        )
-        return render_template('actividad_detail.html', actividad=actividad, resumen=resumen, ingresos=ingresos, gastos=gastos)
+        return render_template('actividades_list.html', actividades=actividades)
 
     @app.route('/actividades/nueva', methods=['GET', 'POST'])
     @role_required('admin', 'tesorero')
