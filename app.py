@@ -501,6 +501,10 @@ def create_app() -> Flask:
             nombre = request.form.get('nombre', '').strip()
             curso = request.form.get('curso', '').strip()
             cuota = parse_float(request.form.get('cuota_mensual', '0'))
+            apoderado = request.form.get('apoderado', '').strip()
+            telefono = request.form.get('telefono', '').strip()
+            direccion = request.form.get('direccion', '').strip()
+            observacion_ficha = request.form.get('observacion_ficha', '').strip()
             activo = 1 if request.form.get('activo') == 'on' else 0
             if not nombre:
                 flash('El nombre es obligatorio.', 'danger')
@@ -508,8 +512,8 @@ def create_app() -> Flask:
                 flash('Ya existe un alumno con ese nombre y curso.', 'danger')
             else:
                 db.execute(
-                    'INSERT INTO alumnos (nombre, curso, cuota_mensual, activo) VALUES (?, ?, ?, ?)',
-                    (nombre, curso, cuota, activo),
+                    'INSERT INTO alumnos (nombre, curso, cuota_mensual, apoderado, telefono, direccion, observacion_ficha, activo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    (nombre, curso, cuota, apoderado, telefono, direccion, observacion_ficha, activo),
                 )
                 db.commit()
                 flash('Alumno creado correctamente.', 'success')
@@ -528,6 +532,10 @@ def create_app() -> Flask:
             nombre = request.form.get('nombre', '').strip()
             curso = request.form.get('curso', '').strip()
             cuota = parse_float(request.form.get('cuota_mensual', '0'))
+            apoderado = request.form.get('apoderado', '').strip()
+            telefono = request.form.get('telefono', '').strip()
+            direccion = request.form.get('direccion', '').strip()
+            observacion_ficha = request.form.get('observacion_ficha', '').strip()
             activo = 1 if request.form.get('activo') == 'on' else 0
             if not nombre:
                 flash('El nombre es obligatorio.', 'danger')
@@ -535,8 +543,8 @@ def create_app() -> Flask:
                 flash('Ya existe otro alumno con ese nombre y curso.', 'danger')
             else:
                 db.execute(
-                    'UPDATE alumnos SET nombre = ?, curso = ?, cuota_mensual = ?, activo = ? WHERE id = ?',
-                    (nombre, curso, cuota, activo, alumno_id),
+                    'UPDATE alumnos SET nombre = ?, curso = ?, cuota_mensual = ?, apoderado = ?, telefono = ?, direccion = ?, observacion_ficha = ?, activo = ? WHERE id = ?',
+                    (nombre, curso, cuota, apoderado, telefono, direccion, observacion_ficha, activo, alumno_id),
                 )
                 db.commit()
                 flash('Alumno actualizado.', 'success')
@@ -632,7 +640,13 @@ def create_app() -> Flask:
             'gastos_asociados': float(resumen_aportes['gastos_asociados'] or 0),
             'movimientos_asociados': int(resumen_aportes['movimientos_asociados'] or 0),
         }
-        return render_template('alumno_detail.html', alumno=alumno, historial=historial, resumen=resumen, actividad_resumen=actividad_resumen)
+        ficha = {
+            'apoderado': alumno.get('apoderado') if hasattr(alumno, 'get') else alumno['apoderado'],
+            'telefono': alumno.get('telefono') if hasattr(alumno, 'get') else alumno['telefono'],
+            'direccion': alumno.get('direccion') if hasattr(alumno, 'get') else alumno['direccion'],
+            'observacion_ficha': alumno.get('observacion_ficha') if hasattr(alumno, 'get') else alumno['observacion_ficha'],
+        }
+        return render_template('alumno_detail.html', alumno=alumno, historial=historial, resumen=resumen, actividad_resumen=actividad_resumen, ficha=ficha)
 
     @app.route('/pagos')
     @login_required
@@ -1295,6 +1309,10 @@ def init_db(db: DBAdapter) -> None:
             nombre TEXT NOT NULL,
             curso TEXT,
             cuota_mensual DOUBLE PRECISION NOT NULL DEFAULT 0,
+            apoderado TEXT,
+            telefono TEXT,
+            direccion TEXT,
+            observacion_ficha TEXT,
             activo INTEGER NOT NULL DEFAULT 1
         );
 
@@ -1351,6 +1369,10 @@ def init_db(db: DBAdapter) -> None:
             nombre TEXT NOT NULL,
             curso TEXT,
             cuota_mensual REAL NOT NULL DEFAULT 0,
+            apoderado TEXT,
+            telefono TEXT,
+            direccion TEXT,
+            observacion_ficha TEXT,
             activo INTEGER NOT NULL DEFAULT 1
         );
 
@@ -1390,6 +1412,10 @@ def init_db(db: DBAdapter) -> None:
         "ALTER TABLE movimientos ADD COLUMN origen TEXT NOT NULL DEFAULT 'general'",
         'ALTER TABLE pagos_alumnos ADD COLUMN observacion TEXT',
         'ALTER TABLE pagos_alumnos ADD COLUMN movimiento_id BIGINT',
+        'ALTER TABLE alumnos ADD COLUMN apoderado TEXT',
+        'ALTER TABLE alumnos ADD COLUMN telefono TEXT',
+        'ALTER TABLE alumnos ADD COLUMN direccion TEXT',
+        'ALTER TABLE alumnos ADD COLUMN observacion_ficha TEXT',
     ]:
         try:
             db.execute(statement)

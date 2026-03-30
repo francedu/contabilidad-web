@@ -2,11 +2,49 @@
 {% block title %}Alumno{% endblock %}
 {% block content %}
 <h1 class="h3 mb-3">{{ 'Editar alumno' if alumno else 'Nuevo alumno' }}</h1>
-<div class="card shadow-sm"><div class="card-body"><form method="post" class="row g-3">
-  <div class="col-md-6"><label class="form-label">Nombre</label><input class="form-control" name="nombre" value="{{ alumno['nombre'] if alumno else '' }}" required></div>
-  <div class="col-md-3"><label class="form-label">Curso</label><input class="form-control" name="curso" value="{{ alumno['curso'] if alumno else '' }}"></div>
-  <div class="col-md-3"><label class="form-label">Cuota mensual</label><input class="form-control" name="cuota_mensual" value="{{ alumno['cuota_mensual'] if alumno else '' }}"></div>
-  <div class="col-12 form-check ms-2"><input class="form-check-input" type="checkbox" name="activo" {% if not alumno or alumno['activo'] %}checked{% endif %}><label class="form-check-label">Alumno activo</label></div>
-  <div class="col-12 d-flex gap-2"><button class="btn btn-primary">Guardar</button><a class="btn btn-outline-secondary" href="{{ url_for('alumnos_list') }}">Cancelar</a></div>
-</form></div></div>
+<div class="card shadow-sm">
+  <div class="card-body">
+    <form method="post" class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label">Nombre</label>
+        <input class="form-control" name="nombre" value="{{ alumno['nombre'] if alumno else '' }}" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Curso</label>
+        <input class="form-control" name="curso" value="{{ alumno['curso'] if alumno else '' }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Cuota mensual</label>
+        <input class="form-control" name="cuota_mensual" value="{{ alumno['cuota_mensual'] if alumno else '' }}">
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label">Apoderado</label>
+        <input class="form-control" name="apoderado" value="{{ alumno['apoderado'] if alumno else '' }}" placeholder="Nombre del apoderado o tutor">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Teléfono</label>
+        <input class="form-control" name="telefono" value="{{ alumno['telefono'] if alumno else '' }}" placeholder="Ej. +56 9 ...">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Dirección</label>
+        <input class="form-control" name="direccion" value="{{ alumno['direccion'] if alumno else '' }}" placeholder="Dirección del alumno">
+      </div>
+
+      <div class="col-12">
+        <label class="form-label">Observaciones</label>
+        <textarea class="form-control" name="observacion_ficha" rows="3" placeholder="Notas relevantes del alumno">{{ alumno['observacion_ficha'] if alumno else '' }}</textarea>
+      </div>
+
+      <div class="col-12 form-check ms-2">
+        <input class="form-check-input" type="checkbox" name="activo" {% if not alumno or alumno['activo'] %}checked{% endif %}>
+        <label class="form-check-label">Alumno activo</label>
+      </div>
+      <div class="col-12 d-flex gap-2">
+        <button class="btn btn-primary">Guardar</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('alumnos_list') }}">Cancelar</a>
+      </div>
+    </form>
+  </div>
+</div>
 {% endblock %}
