@@ -1405,22 +1405,39 @@ def init_db(db: DBAdapter) -> None:
     db.executescript(script)
 
     # Migraciones suaves para bases existentes creadas con versiones anteriores.
-    for statement in [
-        'ALTER TABLE actividades ADD COLUMN descripcion TEXT',
-        'ALTER TABLE movimientos ADD COLUMN actividad_id BIGINT',
-        'ALTER TABLE movimientos ADD COLUMN alumno_id BIGINT',
-        "ALTER TABLE movimientos ADD COLUMN origen TEXT NOT NULL DEFAULT 'general'",
-        'ALTER TABLE pagos_alumnos ADD COLUMN observacion TEXT',
-        'ALTER TABLE pagos_alumnos ADD COLUMN movimiento_id BIGINT',
-        'ALTER TABLE alumnos ADD COLUMN apoderado TEXT',
-        'ALTER TABLE alumnos ADD COLUMN telefono TEXT',
-        'ALTER TABLE alumnos ADD COLUMN direccion TEXT',
-        'ALTER TABLE alumnos ADD COLUMN observacion_ficha TEXT',
-    ]:
+    if db.kind == 'postgres':
+        migration_statements = [
+            'ALTER TABLE actividades ADD COLUMN IF NOT EXISTS descripcion TEXT',
+            'ALTER TABLE movimientos ADD COLUMN IF NOT EXISTS actividad_id BIGINT',
+            'ALTER TABLE movimientos ADD COLUMN IF NOT EXISTS alumno_id BIGINT',
+            "ALTER TABLE movimientos ADD COLUMN IF NOT EXISTS origen TEXT NOT NULL DEFAULT 'general'",
+            'ALTER TABLE pagos_alumnos ADD COLUMN IF NOT EXISTS observacion TEXT',
+            'ALTER TABLE pagos_alumnos ADD COLUMN IF NOT EXISTS movimiento_id BIGINT',
+            'ALTER TABLE alumnos ADD COLUMN IF NOT EXISTS apoderado TEXT',
+            'ALTER TABLE alumnos ADD COLUMN IF NOT EXISTS telefono TEXT',
+            'ALTER TABLE alumnos ADD COLUMN IF NOT EXISTS direccion TEXT',
+            'ALTER TABLE alumnos ADD COLUMN IF NOT EXISTS observacion_ficha TEXT',
+        ]
+    else:
+        migration_statements = [
+            'ALTER TABLE actividades ADD COLUMN descripcion TEXT',
+            'ALTER TABLE movimientos ADD COLUMN actividad_id INTEGER',
+            'ALTER TABLE movimientos ADD COLUMN alumno_id INTEGER',
+            "ALTER TABLE movimientos ADD COLUMN origen TEXT NOT NULL DEFAULT 'general'",
+            'ALTER TABLE pagos_alumnos ADD COLUMN observacion TEXT',
+            'ALTER TABLE pagos_alumnos ADD COLUMN movimiento_id INTEGER',
+            'ALTER TABLE alumnos ADD COLUMN apoderado TEXT',
+            'ALTER TABLE alumnos ADD COLUMN telefono TEXT',
+            'ALTER TABLE alumnos ADD COLUMN direccion TEXT',
+            'ALTER TABLE alumnos ADD COLUMN observacion_ficha TEXT',
+        ]
+
+    for statement in migration_statements:
         try:
             db.execute(statement)
+            db.commit()
         except Exception:
-            pass
+            db.rollback()
     db.commit()
 
 
