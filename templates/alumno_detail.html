@@ -1,8 +1,73 @@
 {% extends 'base.html' %}
-{% block title %}Historial alumno{% endblock %}
+{% block title %}Ficha del alumno{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3"><div><h1 class="h3 mb-0">{{ alumno['nombre'] }}</h1><div class="text-muted">{{ alumno['curso'] or 'Sin curso' }} · Cuota {{ formato_monto(alumno['cuota_mensual']) }}</div></div>{% if current_user.can_edit() %}<a class="btn btn-outline-primary" href="{{ url_for('alumnos_edit', alumno_id=alumno['id']) }}">Editar</a>{% endif %}</div>
-<div class="card shadow-sm"><div class="card-body p-0"><div class="table-responsive"><table class="table table-striped mb-0 align-middle"><thead><tr><th>Fecha</th><th>Mes</th><th>Tipo</th><th>Actividad</th><th>Observación</th><th class="text-end">Monto</th></tr></thead><tbody>
-{% for row in historial %}<tr><td>{{ row['fecha'] }}</td><td>{{ row['mes'] }}</td><td>{{ row['tipo'] }}</td><td>{{ row['actividad'] or '-' }}</td><td>{{ row['observacion'] or '-' }}</td><td class="text-end">{{ formato_monto(row['monto']) }}</td></tr>{% else %}<tr><td colspan="6" class="text-center text-muted py-4">Sin historial registrado.</td></tr>{% endfor %}
-</tbody></table></div></div></div>
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h1 class="h3 mb-0">{{ alumno['nombre'] }}</h1>
+    <div class="text-muted">{{ alumno['curso'] or 'Sin curso' }} · Cuota {{ formato_monto(alumno['cuota_mensual']) }}</div>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <form class="d-flex gap-2" method="get">
+      <input class="form-control" type="month" name="mes" value="{{ resumen['mes'] }}">
+      <button class="btn btn-outline-secondary">Ver mes</button>
+    </form>
+    {% if current_user.can_edit() %}<a class="btn btn-outline-primary" href="{{ url_for('alumnos_edit', alumno_id=alumno['id']) }}">Editar</a>{% endif %}
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-3"><div class="card shadow-sm h-100"><div class="card-body"><div class="text-muted small">Pagado en {{ resumen['mes'] }}</div><div class="fs-4 fw-semibold">{{ formato_monto(resumen['pagado_mes']) }}</div><div class="text-muted">{{ resumen['pagos_mes'] }} pago(s)</div></div></div></div>
+  <div class="col-md-3"><div class="card shadow-sm h-100"><div class="card-body"><div class="text-muted small">Deuda del mes</div><div class="fs-4 fw-semibold">{{ formato_monto(resumen['deuda_mes']) }}</div><div class="text-muted">Cuota pendiente actual</div></div></div></div>
+  <div class="col-md-3"><div class="card shadow-sm h-100"><div class="card-body"><div class="text-muted small">Ingresos asociados</div><div class="fs-4 fw-semibold">{{ formato_monto(resumen['ingresos_actividad']) }}</div><div class="text-muted">Ingresos vinculados al alumno</div></div></div></div>
+  <div class="col-md-3"><div class="card shadow-sm h-100"><div class="card-body"><div class="text-muted small">Movimientos asociados</div><div class="fs-4 fw-semibold">{{ resumen['movimientos_asociados'] }}</div><div class="text-muted">Ingresos y egresos relacionados</div></div></div></div>
+</div>
+
+<div class="card shadow-sm mb-3">
+  <div class="card-header bg-white"><h2 class="h5 mb-0">Resumen por actividad</h2></div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0 align-middle">
+        <thead><tr><th>Actividad</th><th class="text-end">Ingresos</th><th class="text-end">Egresos</th><th class="text-end">Balance</th><th class="text-center">Movs.</th></tr></thead>
+        <tbody>
+          {% for row in actividad_resumen %}
+          <tr>
+            <td>{% if row['actividad_id'] %}<a href="{{ url_for('actividad_detail', actividad_id=row['actividad_id']) }}">{{ row['actividad'] }}</a>{% else %}{{ row['actividad'] }}{% endif %}</td>
+            <td class="text-end">{{ formato_monto(row['ingresos']) }}</td>
+            <td class="text-end">{{ formato_monto(row['egresos']) }}</td>
+            <td class="text-end">{{ formato_monto((row['ingresos'] or 0) - (row['egresos'] or 0)) }}</td>
+            <td class="text-center">{{ row['movimientos'] }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-center text-muted py-4">Este alumno no tiene movimientos asociados a actividades.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card shadow-sm">
+  <div class="card-header bg-white"><h2 class="h5 mb-0">Historial completo</h2></div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-striped mb-0 align-middle">
+        <thead><tr><th>Fecha</th><th>Mes</th><th>Tipo</th><th>Actividad</th><th>Observación</th><th class="text-end">Monto</th></tr></thead>
+        <tbody>
+        {% for row in historial %}
+          <tr>
+            <td>{{ row['fecha'] }}</td>
+            <td>{{ row['mes'] }}</td>
+            <td>{{ row['tipo'] }}</td>
+            <td>{{ row['actividad'] or '-' }}</td>
+            <td>{{ row['observacion'] or '-' }}</td>
+            <td class="text-end">{{ formato_monto(row['monto']) }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="text-center text-muted py-4">Sin historial registrado.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
 {% endblock %}

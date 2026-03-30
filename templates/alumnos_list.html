@@ -1,20 +1,35 @@
 {% extends 'base.html' %}
 {% block title %}Alumnos{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3"><h1 class="h3 mb-0">Alumnos</h1>{% if current_user.can_edit() %}<a class="btn btn-primary" href="{{ url_for('alumnos_new') }}">Nuevo alumno</a>{% endif %}</div>
-<form class="row g-2 mb-3"><div class="col-md-4"><input class="form-control" name="q" value="{{ q }}" placeholder="Buscar por nombre o curso"></div><div class="col-auto"><button class="btn btn-outline-secondary">Buscar</button></div></form>
-<div class="card shadow-sm"><div class="card-body p-0"><div class="table-responsive"><table class="table table-hover mb-0 align-middle"><thead><tr><th>Nombre</th><th>Curso</th><th>Cuota</th><th>Activo</th><th></th></tr></thead><tbody>
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h1 class="h3 mb-0">Alumnos</h1>
+    <div class="text-muted">Deuda total del mes {{ mes }}: {{ formato_monto(deuda_total) }}</div>
+  </div>
+  {% if current_user.can_edit() %}<a class="btn btn-primary" href="{{ url_for('alumnos_new') }}">Nuevo alumno</a>{% endif %}
+</div>
+<form class="row g-2 mb-3">
+  <div class="col-md-4"><input class="form-control" name="q" value="{{ q }}" placeholder="Buscar por nombre o curso"></div>
+  <div class="col-md-3"><input class="form-control" type="month" name="mes" value="{{ mes }}"></div>
+  <div class="col-auto"><button class="btn btn-outline-secondary">Buscar</button></div>
+</form>
+<div class="card shadow-sm"><div class="card-body p-0"><div class="table-responsive"><table class="table table-hover mb-0 align-middle"><thead><tr><th>Nombre</th><th>Curso</th><th class="text-end">Cuota</th><th class="text-end">Pagado {{ mes }}</th><th class="text-end">Debe {{ mes }}</th><th>Activo</th><th></th></tr></thead><tbody>
 {% for alumno in alumnos %}
 <tr>
-  <td><a href="{{ url_for('alumno_detail', alumno_id=alumno['id']) }}">{{ alumno['nombre'] }}</a></td><td>{{ alumno['curso'] or '-' }}</td><td>{{ formato_monto(alumno['cuota_mensual']) }}</td><td>{{ 'Sí' if alumno['activo'] else 'No' }}</td>
+  <td><a href="{{ url_for('alumno_detail', alumno_id=alumno['id'], mes=mes) }}">{{ alumno['nombre'] }}</a></td>
+  <td>{{ alumno['curso'] or '-' }}</td>
+  <td class="text-end">{{ formato_monto(alumno['cuota_mensual']) }}</td>
+  <td class="text-end">{{ formato_monto(alumno['pagado_mes']) }}</td>
+  <td class="text-end">{{ formato_monto([alumno['cuota_mensual'] - alumno['pagado_mes'], 0]|max) }}</td>
+  <td>{{ 'Sí' if alumno['activo'] else 'No' }}</td>
   <td class="text-end">
-    <div class="d-inline-flex gap-2">
-      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('alumno_detail', alumno_id=alumno['id']) }}">Historial</a>
+    <div class="d-inline-flex gap-2 flex-wrap justify-content-end">
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('alumno_detail', alumno_id=alumno['id'], mes=mes) }}">Ficha</a>
       {% if current_user.can_edit() %}<a class="btn btn-sm btn-outline-primary" href="{{ url_for('alumnos_edit', alumno_id=alumno['id']) }}">Editar</a>{% endif %}
       {% if current_user.can_delete() %}<form method="post" action="{{ url_for('alumnos_delete', alumno_id=alumno['id']) }}" onsubmit="return confirm('¿Eliminar a {{ alumno['nombre'] }} y sus pagos asociados?');"><button class="btn btn-sm btn-outline-danger">Eliminar</button></form>{% endif %}
     </div>
   </td>
 </tr>
-{% else %}<tr><td colspan="5" class="text-center text-muted py-4">Sin alumnos.</td></tr>{% endfor %}
+{% else %}<tr><td colspan="7" class="text-center text-muted py-4">Sin alumnos.</td></tr>{% endfor %}
 </tbody></table></div></div></div>
 {% endblock %}
