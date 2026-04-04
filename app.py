@@ -5,7 +5,6 @@ import re
 import sqlite3
 import subprocess
 from datetime import datetime
-from calendar import month_name
 from functools import wraps
 from pathlib import Path
 from typing import Any
@@ -1011,16 +1010,27 @@ def create_app() -> Flask:
         filtro_reporte = request.args.get('filtro_reporte', 'deuda').strip().lower()
         if filtro_reporte not in ('deuda', 'todos'):
             filtro_reporte = 'deuda'
+
+        if exportar == 'pdf':
+            pdf_buffer = construir_pdf_deudores(db, mes, filtro_reporte)
+            filename = f'reporte_cuotas_{filtro_reporte}_{mes}.pdf'
+            return send_file(pdf_buffer, mimetype='application/pdf', as_attachment=True, download_name=filename)
+
         filas = resumen_cuotas_por_alumno(db, mes)
         total_esperado = sum(float(x['cuota_mensual']) for x in filas if x['activo'])
         total_pagado = sum(float(x['pagado']) for x in filas)
         total_debe = sum(max(float(x['cuota_mensual']) - float(x['pagado']), 0) for x in filas if x['activo'])
         alertas = obtener_alertas_morosidad(db, mes)
-        if exportar == 'pdf':
-            pdf_buffer = construir_pdf_deudores(db, mes, filtro_reporte)
-            filename = f"reporte_cuotas_{filtro_reporte}_{mes}.pdf"
-            return send_file(pdf_buffer, mimetype='application/pdf', as_attachment=True, download_name=filename)
-        return render_template('cuotas.html', filas=filas, mes=mes, total_esperado=total_esperado, total_pagado=total_pagado, total_debe=total_debe, alertas=alertas, filtro_reporte=filtro_reporte)
+        return render_template(
+            'cuotas.html',
+            filas=filas,
+            mes=mes,
+            total_esperado=total_esperado,
+            total_pagado=total_pagado,
+            total_debe=total_debe,
+            alertas=alertas,
+            filtro_reporte=filtro_reporte,
+        )
 
     @app.errorhandler(500)
     def internal_server_error(exc):
@@ -1276,7 +1286,6 @@ def obtener_alertas_morosidad(db: DBAdapter, mes: str):
     return alertas
 
 
-
 def meses_hasta_corte(mes_corte: str) -> list[str]:
     corte = datetime.strptime(mes_corte + '-01', '%Y-%m-%d')
     return [f"{corte.year}-{mes:02d}" for mes in range(1, corte.month + 1)]
@@ -1328,6 +1337,7 @@ def resumen_deuda_acumulada_por_alumno(db: DBAdapter, mes_corte: str):
                     'mes': mes,
                     'deuda': deuda_mes,
                 })
+
         esperado_acumulado = cuota * len(meses) if fila['activo'] else 0.0
         resumen.append({
             'id': fila['id'],
@@ -1356,13 +1366,21 @@ def construir_pdf_deudores(db: DBAdapter, mes_corte: str, modo: str = 'deuda') -
     total_deuda = sum(float(f['deuda_total']) for f in filas)
 
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=12 * mm, rightMargin=12 * mm, topMargin=12 * mm, bottomMargin=12 * mm)
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        leftMargin=12 * mm,
+        rightMargin=12 * mm,
+        topMargin=12 * mm,
+        bottomMargin=12 * mm,
+    )
     styles = getSampleStyleSheet()
     elements = []
-
     corte_dt = datetime.strptime(mes_corte + '-01', '%Y-%m-%d')
     titulo = 'Reporte de alumnos con deuda' if modo == 'deuda' else 'Reporte general de alumnos'
-    subtitulo = f'Corte hasta {nombre_mes_es(corte_dt.month)} de {corte_dt.year} · filtro: {'solo con deuda' if modo == 'deuda' else 'todos'}'
+    filtro_txt = 'solo con deuda' if modo == 'deuda' else 'todos'
+    subtitulo = f'Corte hasta {nombre_mes_es(corte_dt.month)} de {corte_dt.year} · filtro: {filtro_txt}'
+
     elements.append(Paragraph(f'<b>{SCHOOL_NAME}</b>', styles['Title']))
     elements.append(Paragraph(titulo, styles['Heading2']))
     elements.append(Paragraph(subtitulo, styles['Normal']))
@@ -1387,7 +1405,7 @@ def construir_pdf_deudores(db: DBAdapter, mes_corte: str, modo: str = 'deuda') -
             meses_adeudados,
         ])
 
-    table = Table(data, repeatRows=1, colWidths=[60*mm, 28*mm, 23*mm, 15*mm, 26*mm, 26*mm, 24*mm, 68*mm])
+    table = Table(data, repeatRows=1, colWidths=[60 * mm, 28 * mm, 23 * mm, 15 * mm, 26 * mm, 26 * mm, 24 * mm, 68 * mm])
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f2937')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -1405,6 +1423,7 @@ def construir_pdf_deudores(db: DBAdapter, mes_corte: str, modo: str = 'deuda') -
     doc.build(elements)
     buffer.seek(0)
     return buffer
+
 
 def seed_default_admin(db: DBAdapter) -> None:
     has_user = db.fetchone('SELECT 1 FROM usuarios LIMIT 1')
