@@ -5,6 +5,7 @@ import re
 import sqlite3
 import subprocess
 from datetime import datetime
+from calendar import month_name
 from functools import wraps
 from pathlib import Path
 from typing import Any
@@ -1006,12 +1007,20 @@ def create_app() -> Flask:
     def cuotas_view():
         db = get_db()
         mes = request.args.get('mes') or datetime.today().strftime('%Y-%m')
+        exportar = request.args.get('exportar', '').strip().lower()
+        filtro_reporte = request.args.get('filtro_reporte', 'deuda').strip().lower()
+        if filtro_reporte not in ('deuda', 'todos'):
+            filtro_reporte = 'deuda'
         filas = resumen_cuotas_por_alumno(db, mes)
         total_esperado = sum(float(x['cuota_mensual']) for x in filas if x['activo'])
         total_pagado = sum(float(x['pagado']) for x in filas)
         total_debe = sum(max(float(x['cuota_mensual']) - float(x['pagado']), 0) for x in filas if x['activo'])
         alertas = obtener_alertas_morosidad(db, mes)
-        return render_template('cuotas.html', filas=filas, mes=mes, total_esperado=total_esperado, total_pagado=total_pagado, total_debe=total_debe, alertas=alertas)
+        if exportar == 'pdf':
+            pdf_buffer = construir_pdf_deudores(db, mes, filtro_reporte)
+            filename = f"reporte_cuotas_{filtro_reporte}_{mes}.pdf"
+            return send_file(pdf_buffer, mimetype='application/pdf', as_attachment=True, download_name=filename)
+        return render_template('cuotas.html', filas=filas, mes=mes, total_esperado=total_esperado, total_pagado=total_pagado, total_debe=total_debe, alertas=alertas, filtro_reporte=filtro_reporte)
 
     @app.errorhandler(500)
     def internal_server_error(exc):
@@ -1266,6 +1275,136 @@ def obtener_alertas_morosidad(db: DBAdapter, mes: str):
             })
     return alertas
 
+
+
+def meses_hasta_corte(mes_corte: str) -> list[str]:
+    corte = datetime.strptime(mes_corte + '-01', '%Y-%m-%d')
+    return [f"{corte.year}-{mes:02d}" for mes in range(1, corte.month + 1)]
+
+
+def nombre_mes_es(numero_mes: int) -> str:
+    nombres = {
+        1: 'enero', 2: 'febrero', 3: 'marzo', 4: 'abril', 5: 'mayo', 6: 'junio',
+        7: 'julio', 8: 'agosto', 9: 'septiembre', 10: 'octubre', 11: 'noviembre', 12: 'diciembre',
+    }
+    return nombres.get(numero_mes, str(numero_mes))
+
+
+def resumen_deuda_acumulada_por_alumno(db: DBAdapter, mes_corte: str):
+    meses = meses_hasta_corte(mes_corte)
+    filas = db.fetchall(
+        """
+        SELECT a.id, a.nombre, a.curso, a.cuota_mensual, a.activo
+        FROM alumnos a
+        ORDER BY a.nombre
+        """
+    )
+    pagos_rows = db.fetchall(
+        """
+        SELECT p.alumno_id, p.mes, COALESCE(SUM(p.monto), 0) AS monto
+        FROM pagos_alumnos p
+        WHERE substr(p.mes, 1, 4) = ? AND p.mes <= ?
+        GROUP BY p.alumno_id, p.mes
+        """,
+        (mes_corte[:4], mes_corte),
+    )
+    pagos_map: dict[tuple[int, str], float] = {}
+    for row in pagos_rows:
+        pagos_map[(int(row['alumno_id']), row['mes'])] = float(row['monto'] or 0)
+
+    resumen = []
+    for fila in filas:
+        cuota = float(fila['cuota_mensual'] or 0)
+        detalle_deuda = []
+        pagado_acumulado = 0.0
+        deuda_total = 0.0
+        for mes in meses:
+            pagado_mes = float(pagos_map.get((int(fila['id']), mes), 0) or 0)
+            pagado_acumulado += pagado_mes
+            deuda_mes = max(cuota - pagado_mes, 0) if fila['activo'] else 0.0
+            deuda_total += deuda_mes
+            if fila['activo'] and deuda_mes > 0:
+                detalle_deuda.append({
+                    'mes': mes,
+                    'deuda': deuda_mes,
+                })
+        esperado_acumulado = cuota * len(meses) if fila['activo'] else 0.0
+        resumen.append({
+            'id': fila['id'],
+            'nombre': fila['nombre'],
+            'curso': fila['curso'],
+            'cuota_mensual': cuota,
+            'activo': fila['activo'],
+            'meses_considerados': len(meses),
+            'esperado_acumulado': esperado_acumulado,
+            'pagado_acumulado': pagado_acumulado,
+            'deuda_total': deuda_total,
+            'detalle_deuda': detalle_deuda,
+        })
+    return resumen
+
+
+def construir_pdf_deudores(db: DBAdapter, mes_corte: str, modo: str = 'deuda') -> BytesIO:
+    filas = resumen_deuda_acumulada_por_alumno(db, mes_corte)
+    if modo == 'deuda':
+        filas = [fila for fila in filas if fila['activo'] and fila['deuda_total'] > 0]
+    else:
+        filas = [fila for fila in filas if fila['activo']]
+
+    total_esperado = sum(float(f['esperado_acumulado']) for f in filas)
+    total_pagado = sum(float(f['pagado_acumulado']) for f in filas)
+    total_deuda = sum(float(f['deuda_total']) for f in filas)
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=12 * mm, rightMargin=12 * mm, topMargin=12 * mm, bottomMargin=12 * mm)
+    styles = getSampleStyleSheet()
+    elements = []
+
+    corte_dt = datetime.strptime(mes_corte + '-01', '%Y-%m-%d')
+    titulo = 'Reporte de alumnos con deuda' if modo == 'deuda' else 'Reporte general de alumnos'
+    subtitulo = f'Corte hasta {nombre_mes_es(corte_dt.month)} de {corte_dt.year} · filtro: {'solo con deuda' if modo == 'deuda' else 'todos'}'
+    elements.append(Paragraph(f'<b>{SCHOOL_NAME}</b>', styles['Title']))
+    elements.append(Paragraph(titulo, styles['Heading2']))
+    elements.append(Paragraph(subtitulo, styles['Normal']))
+    elements.append(Spacer(1, 6))
+    elements.append(Paragraph(
+        f'Alumnos incluidos: {len(filas)} &nbsp;&nbsp;&nbsp; Total esperado: {formato_monto(total_esperado)} &nbsp;&nbsp;&nbsp; Total pagado: {formato_monto(total_pagado)} &nbsp;&nbsp;&nbsp; Deuda total: {formato_monto(total_deuda)}',
+        styles['Normal']
+    ))
+    elements.append(Spacer(1, 8))
+
+    data = [['Alumno', 'Curso', 'Cuota', 'Meses', 'Esperado', 'Pagado', 'Debe', 'Meses adeudados']]
+    for fila in filas:
+        meses_adeudados = ', '.join(nombre_mes_es(int(item['mes'][5:7])) for item in fila['detalle_deuda']) or 'Sin deuda'
+        data.append([
+            fila['nombre'],
+            fila['curso'] or '-',
+            formato_monto(fila['cuota_mensual']),
+            str(fila['meses_considerados']),
+            formato_monto(fila['esperado_acumulado']),
+            formato_monto(fila['pagado_acumulado']),
+            formato_monto(fila['deuda_total']),
+            meses_adeudados,
+        ])
+
+    table = Table(data, repeatRows=1, colWidths=[60*mm, 28*mm, 23*mm, 15*mm, 26*mm, 26*mm, 24*mm, 68*mm])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f2937')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 0.3, colors.grey),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.whitesmoke, colors.HexColor('#f8fafc')]),
+        ('ALIGN', (2, 1), (6, -1), 'RIGHT'),
+        ('ALIGN', (3, 1), (3, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    elements.append(table)
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
 
 def seed_default_admin(db: DBAdapter) -> None:
     has_user = db.fetchone('SELECT 1 FROM usuarios LIMIT 1')
