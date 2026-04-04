@@ -1017,10 +1017,18 @@ def create_app() -> Flask:
             return send_file(pdf_buffer, mimetype='application/pdf', as_attachment=True, download_name=filename)
 
         filas = resumen_cuotas_por_alumno(db, mes)
+        if filtro_reporte == 'deuda':
+            filas = [
+                fila for fila in filas
+                if fila['activo'] and max(float(fila['cuota_mensual']) - float(fila['pagado']), 0) > 0
+            ]
+
         total_esperado = sum(float(x['cuota_mensual']) for x in filas if x['activo'])
         total_pagado = sum(float(x['pagado']) for x in filas)
         total_debe = sum(max(float(x['cuota_mensual']) - float(x['pagado']), 0) for x in filas if x['activo'])
         alertas = obtener_alertas_morosidad(db, mes)
+        if filtro_reporte == 'deuda':
+            alertas = [alerta for alerta in alertas if alerta['debe'] > 0]
         return render_template(
             'cuotas.html',
             filas=filas,
@@ -1288,7 +1296,10 @@ def obtener_alertas_morosidad(db: DBAdapter, mes: str):
 
 def meses_hasta_corte(mes_corte: str) -> list[str]:
     corte = datetime.strptime(mes_corte + '-01', '%Y-%m-%d')
-    return [f"{corte.year}-{mes:02d}" for mes in range(1, corte.month + 1)]
+    mes_inicio = 3
+    if corte.month < mes_inicio:
+        return []
+    return [f"{corte.year}-{mes:02d}" for mes in range(mes_inicio, corte.month + 1)]
 
 
 def nombre_mes_es(numero_mes: int) -> str:
@@ -1379,7 +1390,7 @@ def construir_pdf_deudores(db: DBAdapter, mes_corte: str, modo: str = 'deuda') -
     corte_dt = datetime.strptime(mes_corte + '-01', '%Y-%m-%d')
     titulo = 'Reporte de alumnos con deuda' if modo == 'deuda' else 'Reporte general de alumnos'
     filtro_txt = 'solo con deuda' if modo == 'deuda' else 'todos'
-    subtitulo = f'Corte hasta {nombre_mes_es(corte_dt.month)} de {corte_dt.year} · filtro: {filtro_txt}'
+    subtitulo = f'Deuda acumulada desde marzo hasta {nombre_mes_es(corte_dt.month)} de {corte_dt.year} · filtro: {filtro_txt}'
 
     elements.append(Paragraph(f'<b>{SCHOOL_NAME}</b>', styles['Title']))
     elements.append(Paragraph(titulo, styles['Heading2']))
