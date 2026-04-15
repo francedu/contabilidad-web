@@ -42,6 +42,18 @@ BACKUP_DIR.mkdir(exist_ok=True)
 SCHOOL_NAME = 'Escuela Las Mercedes'
 SCHOOL_LOCATION = 'María Pinto'
 ALLOWED_ROLES = ('admin', 'tesorero', 'apoderado', 'solo_lectura')
+PREDEFINED_COURSES = [
+    'Prekínder',
+    'Kínder',
+    '1° Básico',
+    '2° Básico',
+    '3° Básico',
+    '4° Básico',
+    '5° Básico',
+    '6° Básico',
+    '7° Básico',
+    '8° Básico',
+]
 
 
 class User(UserMixin):
@@ -149,6 +161,7 @@ def create_app() -> Flask:
             'current_scope_course': current_course_filter(),
             'selected_admin_course': admin_selected_course(),
             'available_courses': get_available_courses(),
+            'predefined_courses': get_available_courses(include_dynamic=True),
         }
 
     def get_db() -> DBAdapter:
@@ -204,26 +217,25 @@ def create_app() -> Flask:
     def current_course_filter() -> str | None:
         return user_course_scope() or admin_selected_course()
 
-    def get_available_courses() -> list[str]:
-        if not current_user.is_authenticated:
-            return []
-        db = get_db()
-        cursos: set[str] = set()
-        queries = [
-            "SELECT DISTINCT curso FROM alumnos WHERE curso IS NOT NULL AND trim(curso) <> ''",
-            "SELECT DISTINCT curso FROM actividades WHERE curso IS NOT NULL AND trim(curso) <> ''",
-            "SELECT DISTINCT curso FROM movimientos WHERE curso IS NOT NULL AND trim(curso) <> ''",
-            "SELECT DISTINCT curso FROM usuarios WHERE curso IS NOT NULL AND trim(curso) <> ''",
-        ]
-        for sql in queries:
-            try:
-                for row in db.fetchall(sql):
-                    valor = (row['curso'] or '').strip()
-                    if valor:
-                        cursos.add(valor)
-            except Exception:
-                continue
-        return sorted(cursos, key=lambda x: normalize_course(x))
+    def get_available_courses(include_dynamic: bool = True) -> list[str]:
+        cursos: dict[str, str] = {normalize_course(curso): curso for curso in PREDEFINED_COURSES}
+        if include_dynamic and current_user.is_authenticated:
+            db = get_db()
+            queries = [
+                "SELECT DISTINCT curso FROM alumnos WHERE curso IS NOT NULL AND trim(curso) <> ''",
+                "SELECT DISTINCT curso FROM actividades WHERE curso IS NOT NULL AND trim(curso) <> ''",
+                "SELECT DISTINCT curso FROM movimientos WHERE curso IS NOT NULL AND trim(curso) <> ''",
+                "SELECT DISTINCT curso FROM usuarios WHERE curso IS NOT NULL AND trim(curso) <> ''",
+            ]
+            for sql in queries:
+                try:
+                    for row in db.fetchall(sql):
+                        valor = (row['curso'] or '').strip()
+                        if valor:
+                            cursos.setdefault(normalize_course(valor), valor)
+                except Exception:
+                    continue
+        return sorted(cursos.values(), key=lambda x: normalize_course(x))
 
     def course_filter_sql(sql: str, params: list[Any], alias: str, column: str = 'curso') -> tuple[str, list[Any]]:
         curso = current_course_filter()

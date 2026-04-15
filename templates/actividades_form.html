@@ -5,7 +5,24 @@
 <div class="card shadow-sm"><div class="card-body"><form method="post" class="row g-3">
   <div class="col-md-6"><label class="form-label">Nombre</label><input class="form-control" name="nombre" value="{{ actividad['nombre'] if actividad else '' }}" required></div>
   <div class="col-md-3"><label class="form-label">Fecha</label><input class="form-control" type="date" name="fecha" value="{{ actividad['fecha'] if actividad else now.strftime('%Y-%m-%d') }}" required></div>
-  <div class="col-md-3"><label class="form-label">Curso</label><input class="form-control" name="curso" value="{{ actividad['curso'] if actividad else current_scope_course or '' }}" {% if current_scope_course %}readonly{% endif %} placeholder="Ej. 1° básico"></div>
+  <div class="col-md-3">
+    <label class="form-label">Curso</label>
+    {% set selected_course = (actividad['curso'] if actividad else current_scope_course or '') %}
+    {% if current_scope_course %}
+      <input class="form-control" value="{{ current_scope_course }}" readonly>
+      <input type="hidden" name="curso" value="{{ current_scope_course }}">
+    {% else %}
+      <select class="form-select" name="curso">
+        <option value="">Seleccionar curso</option>
+        {% for curso in predefined_courses %}
+          <option value="{{ curso }}" {% if selected_course == curso %}selected{% endif %}>{{ curso }}</option>
+        {% endfor %}
+        {% if selected_course and selected_course not in predefined_courses %}
+          <option value="{{ selected_course }}" selected>{{ selected_course }}</option>
+        {% endif %}
+      </select>
+    {% endif %}
+  </div>
   <div class="col-12"><label class="form-label">Descripción</label><textarea class="form-control" name="descripcion" rows="4">{{ actividad['descripcion'] if actividad else '' }}</textarea></div>
   <div class="col-12 d-flex gap-2"><button class="btn btn-primary">Guardar</button><a class="btn btn-outline-secondary" href="{{ url_for('actividades_list') }}">Cancelar</a></div>
 </form></div></div>

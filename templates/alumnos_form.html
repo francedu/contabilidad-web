@@ -19,7 +19,21 @@
         </div>
         <div class="col-md-3">
           <label class="form-label">Curso</label>
-          <input class="form-control" name="curso" value="{{ alumno['curso'] if alumno else '' }}" placeholder="Ej. 4° básico">
+          {% set selected_course = (alumno['curso'] if alumno else current_scope_course or '') %}
+          {% if current_scope_course %}
+            <input class="form-control" value="{{ current_scope_course }}" readonly>
+            <input type="hidden" name="curso" value="{{ current_scope_course }}">
+          {% else %}
+            <select class="form-select" name="curso" required>
+              <option value="">Seleccionar curso</option>
+              {% for curso in predefined_courses %}
+                <option value="{{ curso }}" {% if selected_course == curso %}selected{% endif %}>{{ curso }}</option>
+              {% endfor %}
+              {% if selected_course and selected_course not in predefined_courses %}
+                <option value="{{ selected_course }}" selected>{{ selected_course }}</option>
+              {% endif %}
+            </select>
+          {% endif %}
         </div>
         <div class="col-md-3">
           <label class="form-label">Cuota mensual</label>

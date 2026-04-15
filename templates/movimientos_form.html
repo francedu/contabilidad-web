@@ -12,10 +12,27 @@
     {% set selected_tipo = movimiento['tipo'] if movimiento else request.args.get('tipo', 'ingreso') %}
     {% set selected_actividad = movimiento['actividad_id'] if movimiento else request.args.get('actividad_id', '')|int %}
     {% set selected_alumno = movimiento['alumno_id'] if movimiento else (selected_alumno_id or request.args.get('alumno_id', ''))|int %}
+    {% set selected_course = (movimiento['curso'] if movimiento else current_scope_course or '') %}
     <div class="col-md-3"><label class="form-label">Fecha</label><input class="form-control" type="date" name="fecha" value="{{ movimiento['fecha'] if movimiento else now.strftime('%Y-%m-%d') }}" required></div>
     <div class="col-md-3"><label class="form-label">Tipo</label><select class="form-select" name="tipo"><option value="ingreso" {% if selected_tipo=='ingreso' %}selected{% endif %}>ingreso</option><option value="gasto" {% if selected_tipo=='gasto' %}selected{% endif %}>gasto</option></select></div>
     <div class="col-md-3"><label class="form-label">Monto</label><div class="input-group"><span class="input-group-text">$</span><input class="form-control" name="monto" data-money-input inputmode="decimal" value="{{ movimiento['monto'] if movimiento else '' }}" required placeholder="0"></div></div>
-    <div class="col-md-3"><label class="form-label">Curso</label><input class="form-control" name="curso" value="{{ movimiento['curso'] if movimiento else current_scope_course or '' }}" {% if current_scope_course %}readonly{% endif %} placeholder="Ej. 1° básico"></div>
+    <div class="col-md-3">
+      <label class="form-label">Curso</label>
+      {% if current_scope_course %}
+        <input class="form-control" value="{{ current_scope_course }}" readonly>
+        <input type="hidden" name="curso" value="{{ current_scope_course }}">
+      {% else %}
+        <select class="form-select" name="curso">
+          <option value="">Seleccionar curso</option>
+          {% for curso in predefined_courses %}
+            <option value="{{ curso }}" {% if selected_course == curso %}selected{% endif %}>{{ curso }}</option>
+          {% endfor %}
+          {% if selected_course and selected_course not in predefined_courses %}
+            <option value="{{ selected_course }}" selected>{{ selected_course }}</option>
+          {% endif %}
+        </select>
+      {% endif %}
+    </div>
     <div class="col-md-3"><label class="form-label">Actividad</label><select class="form-select" name="actividad_id"><option value="">Sin actividad</option>{% for a in actividades %}<option value="{{ a['id'] }}" {% if (movimiento and movimiento['actividad_id']==a['id']) or (not movimiento and selected_actividad==a['id']) %}selected{% endif %}>{{ a['nombre'] }}{% if a['curso'] %} · {{ a['curso'] }}{% endif %} ({{ a['fecha'] }})</option>{% endfor %}</select><div class="form-text">Si vienes desde una actividad, ya queda preseleccionada.</div></div>
     <div class="col-md-6"><label class="form-label">Alumno relacionado (opcional)</label><select class="form-select" name="alumno_id"><option value="">Sin alumno asociado</option>{% for alumno in alumnos %}<option value="{{ alumno['id'] }}" {% if selected_alumno==alumno['id'] %}selected{% endif %}>{{ alumno['nombre'] }}{% if alumno['curso'] %} ({{ alumno['curso'] }}){% endif %}</option>{% endfor %}</select><div class="form-text">Úsalo cuando el ingreso o egreso corresponda a un alumno existente.</div></div>
     <div class="col-md-6"><label class="form-label">Concepto</label><input class="form-control" name="concepto" value="{{ movimiento['concepto'] if movimiento else '' }}" required placeholder="Ej. Compra de materiales, aporte de apoderado"></div>
