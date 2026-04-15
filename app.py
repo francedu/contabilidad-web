@@ -55,6 +55,65 @@ PREDEFINED_COURSES = [
     '8° Básico',
 ]
 
+COURSE_NORMALIZATION_MAP = {
+    'Prekínder': ['prekinder', 'pre kinder', 'pre-kinder', 'pre kínder', 'prekínder'],
+    'Kínder': ['kinder', 'kínder'],
+    '1° Básico': ['1', '1 basico', '1 básico', '1ro', '1ro basico', '1ro básico', 'primero', 'primero basico', 'primero básico'],
+    '2° Básico': ['2', '2 basico', '2 básico', '2do', '2do basico', '2do básico', 'segundo', 'segundo basico', 'segundo básico'],
+    '3° Básico': ['3', '3 basico', '3 básico', '3ro', '3ro basico', '3ro básico', 'tercero', 'tercero basico', 'tercero básico'],
+    '4° Básico': ['4', '4 basico', '4 básico', '4to', '4to basico', '4to básico', 'cuarto', 'cuarto basico', 'cuarto básico'],
+    '5° Básico': ['5', '5 basico', '5 básico', '5to', '5to basico', '5to básico', 'quinto', 'quinto basico', 'quinto básico'],
+    '6° Básico': ['6', '6 basico', '6 básico', '6to', '6to basico', '6to básico', 'sexto', 'sexto basico', 'sexto básico'],
+    '7° Básico': ['7', '7 basico', '7 básico', '7mo', '7mo basico', '7mo básico', 'séptimo', 'septimo', 'séptimo basico', 'séptimo básico', 'septimo basico', 'septimo básico'],
+    '8° Básico': ['8', '8 basico', '8 básico', '8vo', '8vo basico', '8vo básico', 'octavo', 'octavo basico', 'octavo básico'],
+}
+
+
+def normalize_course_value(curso: str | None) -> str:
+    value = (curso or '').strip().lower()
+    replacements = str.maketrans({
+        'á': 'a',
+        'é': 'e',
+        'í': 'i',
+        'ó': 'o',
+        'ú': 'u',
+    })
+    return value.translate(replacements)
+
+
+def standardize_course_name(curso: str | None) -> str | None:
+    value = normalize_course_value(curso)
+    if not value:
+        return None
+    for canonical, aliases in COURSE_NORMALIZATION_MAP.items():
+        normalized_aliases = {normalize_course_value(alias) for alias in aliases}
+        normalized_aliases.add(normalize_course_value(canonical))
+        if value in normalized_aliases:
+            return canonical
+    return (curso or '').strip() or None
+
+
+def normalize_courses_in_db(db: 'DBAdapter') -> None:
+    tables = ['usuarios', 'alumnos', 'movimientos', 'actividades']
+    for table in tables:
+        try:
+            rows = db.fetchall(f"SELECT id, curso FROM {table} WHERE curso IS NOT NULL AND trim(curso) <> ''")
+        except Exception:
+            db.rollback()
+            continue
+        changed = False
+        for row in rows:
+            current_value = (row['curso'] or '').strip()
+            canonical = standardize_course_name(current_value)
+            if canonical and canonical != current_value:
+                db.execute(f"UPDATE {table} SET curso = ? WHERE id = ?", (canonical, row['id']))
+                changed = True
+        if changed:
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+
 
 class User(UserMixin):
     def __init__(self, row: Any):
@@ -200,7 +259,7 @@ def create_app() -> Flask:
         return decorator
 
     def normalize_course(curso: str | None) -> str:
-        return (curso or '').strip().lower()
+        return normalize_course_value(curso)
 
     def user_course_scope() -> str | None:
         if not current_user.is_authenticated or current_user.role == 'admin':
@@ -1850,6 +1909,8 @@ def init_db(db: DBAdapter) -> None:
         db.commit()
     except Exception:
         db.rollback()
+
+    normalize_courses_in_db(db)
     db.commit()
 
 
