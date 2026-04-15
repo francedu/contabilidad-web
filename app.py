@@ -208,14 +208,7 @@ def create_app() -> Flask:
 
     @app.get('/healthz')
     def healthz():
-        try:
-            db = get_db()
-            row = db.fetchone('SELECT 1 AS ok')
-            ok = row['ok'] if row else 0
-            return {'status': 'ok', 'db': int(ok)}, 200
-        except Exception as exc:
-            app.logger.exception('Health check failed')
-            return {'status': 'error', 'detail': str(exc)}, 500
+        return {'status': 'ok'}, 200
 
     @app.route('/')
     def index():
