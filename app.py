@@ -146,7 +146,9 @@ def create_app() -> Flask:
             'current_user': current_user,
             'backup_dir': BACKUP_DIR,
             'db_engine': 'PostgreSQL' if is_postgres_url(app.config['DATABASE']) else 'SQLite',
-            'current_scope_course': (current_user.curso if getattr(current_user, 'is_authenticated', False) and getattr(current_user, 'role', None) != 'admin' else None),
+            'current_scope_course': current_course_filter(),
+            'selected_admin_course': admin_selected_course(),
+            'available_courses': get_available_courses(),
         }
 
     def get_db() -> DBAdapter:
@@ -193,8 +195,38 @@ def create_app() -> Flask:
         curso = (getattr(current_user, 'curso', None) or '').strip()
         return curso or None
 
+    def admin_selected_course() -> str | None:
+        if not current_user.is_authenticated or current_user.role != 'admin':
+            return None
+        curso = request.args.get('curso', '').strip()
+        return curso or None
+
+    def current_course_filter() -> str | None:
+        return user_course_scope() or admin_selected_course()
+
+    def get_available_courses() -> list[str]:
+        if not current_user.is_authenticated:
+            return []
+        db = get_db()
+        cursos: set[str] = set()
+        queries = [
+            "SELECT DISTINCT curso FROM alumnos WHERE curso IS NOT NULL AND trim(curso) <> ''",
+            "SELECT DISTINCT curso FROM actividades WHERE curso IS NOT NULL AND trim(curso) <> ''",
+            "SELECT DISTINCT curso FROM movimientos WHERE curso IS NOT NULL AND trim(curso) <> ''",
+            "SELECT DISTINCT curso FROM usuarios WHERE curso IS NOT NULL AND trim(curso) <> ''",
+        ]
+        for sql in queries:
+            try:
+                for row in db.fetchall(sql):
+                    valor = (row['curso'] or '').strip()
+                    if valor:
+                        cursos.add(valor)
+            except Exception:
+                continue
+        return sorted(cursos, key=lambda x: normalize_course(x))
+
     def course_filter_sql(sql: str, params: list[Any], alias: str, column: str = 'curso') -> tuple[str, list[Any]]:
-        curso = user_course_scope()
+        curso = current_course_filter()
         if curso:
             sql += f" AND lower(trim(COALESCE({alias}.{column}, ''))) = lower(trim(?))"
             params.append(curso)
@@ -325,7 +357,7 @@ def create_app() -> Flask:
         reporte_sql += ' GROUP BY substr(fecha, 1, 7) ORDER BY mes ASC'
         reporte = db.fetchall(reporte_sql, reporte_params)
         mes = request.args.get('mes') or datetime.today().strftime('%Y-%m')
-        alertas = obtener_alertas_morosidad(db, mes, user_course_scope())
+        alertas = obtener_alertas_morosidad(db, mes, current_course_filter())
         ultimos_sql = """
             SELECT m.id, m.fecha, m.tipo, m.concepto, m.monto, COALESCE(a.nombre, '-') AS actividad
             FROM movimientos m
@@ -353,7 +385,7 @@ def create_app() -> Flask:
         alumnos_params: list[Any] = []
         alumnos_sql, alumnos_params = course_filter_sql(alumnos_sql, alumnos_params, 'a')
         alumnos_activos = db.fetchone(alumnos_sql, alumnos_params)
-        cuotas = resumen_cuotas_por_alumno(db, mes, user_course_scope())
+        cuotas = resumen_cuotas_por_alumno(db, mes, current_course_filter())
         total_esperado = sum(float(f['cuota_mensual']) for f in cuotas if f['activo'])
         total_pagado = sum(float(f['pagado']) for f in cuotas if f['activo'])
         deuda_total = sum(max(float(f['cuota_mensual']) - float(f['pagado']), 0) for f in cuotas if f['activo'])
@@ -876,7 +908,7 @@ def create_app() -> Flask:
         fecha_hasta = request.args.get('fecha_hasta', '').strip()
         actividad_id = request.args.get('actividad_id', '').strip()
         alumno_id = request.args.get('alumno_id', '').strip()
-        movimientos = obtener_movimientos_filtrados(db, tipo=tipo, mes=mes, q=q, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, actividad_id=actividad_id, alumno_id=alumno_id, curso_scope=user_course_scope())
+        movimientos = obtener_movimientos_filtrados(db, tipo=tipo, mes=mes, q=q, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, actividad_id=actividad_id, alumno_id=alumno_id, curso_scope=current_course_filter())
         actividades_sql = 'SELECT id, nombre, fecha, curso FROM actividades a WHERE 1=1'
         actividades_params: list[Any] = []
         actividades_sql, actividades_params = course_filter_sql(actividades_sql, actividades_params, 'a')
@@ -1046,7 +1078,7 @@ def create_app() -> Flask:
         actividades_sql, actividades_params = course_filter_sql(actividades_sql, actividades_params, 'a')
         actividades_sql += ' GROUP BY a.id, a.nombre, a.fecha, a.curso, a.descripcion ORDER BY a.fecha DESC, a.nombre'
         actividades = db.fetchall(actividades_sql, actividades_params)
-        deudas = resumen_cuotas_por_alumno(db, mes, user_course_scope())
+        deudas = resumen_cuotas_por_alumno(db, mes, current_course_filter())
         total_deuda = sum(max(float(f['cuota_mensual']) - float(f['pagado']), 0) for f in deudas if f['activo'])
         return render_template('actividades_report.html', actividades=actividades, mes=mes, deudas=deudas, total_deuda=total_deuda)
 
@@ -1169,11 +1201,11 @@ def create_app() -> Flask:
             filtro_reporte = 'deuda'
 
         if exportar == 'pdf':
-            pdf_buffer = construir_pdf_deudores(db, mes, filtro_reporte, user_course_scope())
+            pdf_buffer = construir_pdf_deudores(db, mes, filtro_reporte, current_course_filter())
             filename = f'reporte_cuotas_{filtro_reporte}_{mes}.pdf'
             return send_file(pdf_buffer, mimetype='application/pdf', as_attachment=True, download_name=filename)
 
-        filas = resumen_cuotas_por_alumno(db, mes, user_course_scope())
+        filas = resumen_cuotas_por_alumno(db, mes, current_course_filter())
         if filtro_reporte == 'deuda':
             filas = [
                 fila for fila in filas
@@ -1183,7 +1215,7 @@ def create_app() -> Flask:
         total_esperado = sum(float(x['cuota_mensual']) for x in filas if x['activo'])
         total_pagado = sum(float(x['pagado']) for x in filas)
         total_debe = sum(max(float(x['cuota_mensual']) - float(x['pagado']), 0) for x in filas if x['activo'])
-        alertas = obtener_alertas_morosidad(db, mes, user_course_scope())
+        alertas = obtener_alertas_morosidad(db, mes, current_course_filter())
         if filtro_reporte == 'deuda':
             alertas = [alerta for alerta in alertas if alerta['debe'] > 0]
         return render_template(
@@ -1783,6 +1815,14 @@ def init_db(db: DBAdapter) -> None:
     for statement in migration_statements:
         try:
             db.execute(statement)
+            db.commit()
+        except Exception:
+            db.rollback()
+
+    if db.kind == 'postgres':
+        try:
+            db.execute('ALTER TABLE usuarios DROP CONSTRAINT IF EXISTS usuarios_role_check')
+            db.execute("ALTER TABLE usuarios ADD CONSTRAINT usuarios_role_check CHECK(role IN ('admin', 'tesorero', 'apoderado', 'solo_lectura'))")
             db.commit()
         except Exception:
             db.rollback()

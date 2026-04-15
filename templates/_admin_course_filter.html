@@ -1,0 +1,11 @@
+{% if current_user.role == "admin" %}
+<div class="col-lg-3 col-md-3">
+  <label class="form-label">Curso</label>
+  <select class="form-select" name="curso">
+    <option value="">Todos los cursos</option>
+    {% for curso in available_courses %}
+      <option value="{{ curso }}" {% if selected_admin_course == curso %}selected{% endif %}>{{ curso }}</option>
+    {% endfor %}
+  </select>
+</div>
+{% endif %}

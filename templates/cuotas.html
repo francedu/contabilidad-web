@@ -5,12 +5,13 @@
   <h1 class="h3 mb-0">Estado de cuotas</h1>
   <div class="d-flex gap-2">
     {% if current_user.can_edit() %}<a class="btn btn-primary" href="{{ url_for('pagos_new') }}">Registrar pago</a>{% endif %}
-    <a class="btn btn-outline-danger" href="{{ url_for('cuotas_view', mes=mes, filtro_reporte=filtro_reporte, exportar='pdf') }}">Exportar PDF</a>
+    <a class="btn btn-outline-danger" href="{{ url_for('cuotas_view', mes=mes, filtro_reporte=filtro_reporte, exportar='pdf', curso=selected_admin_course) }}">Exportar PDF</a>
   </div>
 </div>
 
 <form class="row g-2 mb-3">
   <div class="col-md-3"><input class="form-control" name="mes" value="{{ mes }}" placeholder="YYYY-MM"></div>
+  {% include "_admin_course_filter.html" %}
   <div class="col-md-3">
     <select class="form-select" name="filtro_reporte">
       <option value="deuda" {{ 'selected' if filtro_reporte == 'deuda' else '' }}>Solo con deuda</option>

@@ -9,9 +9,10 @@
   </div>
   <form method="get" class="month-filter-card">
     <label for="mes" class="form-label small text-muted mb-1">Mes analizado</label>
-    <div class="d-flex gap-2 align-items-center">
-      <input id="mes" name="mes" type="month" value="{{ mes }}" class="form-control">
-      <button class="btn btn-primary">Actualizar</button>
+    <div class="row g-2 align-items-end">
+      <div class="col-md-7"><input id="mes" name="mes" type="month" value="{{ mes }}" class="form-control"></div>
+      {% if current_user.role == "admin" %}<div class="col-md-5"><select class="form-select" name="curso"><option value="">Todos los cursos</option>{% for curso in available_courses %}<option value="{{ curso }}" {% if selected_admin_course == curso %}selected{% endif %}>{{ curso }}</option>{% endfor %}</select></div>{% endif %}
+      <div class="col-12 d-grid"><button class="btn btn-primary">Actualizar</button></div>
     </div>
   </form>
 </div>

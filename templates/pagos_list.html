@@ -19,6 +19,7 @@
 
 <div class="card shadow-sm mb-3 filter-card"><div class="card-body"><form class="row g-2 align-items-end">
   <div class="col-lg-3"><label class="form-label">Mes</label><input class="form-control" type="month" name="mes" value="{{ mes }}"></div>
+  {% include "_admin_course_filter.html" %}
   <div class="col-lg-4"><label class="form-label">Filtro rápido en pantalla</label><input class="form-control" placeholder="Nombre, curso, mes u observación" data-table-filter="#tabla-pagos"></div>
   <div class="col-lg-2 d-grid"><button class="btn btn-outline-secondary">Filtrar</button></div>
   <div class="col-lg-2 d-grid"><a class="btn btn-outline-light border" href="{{ url_for('pagos_list') }}">Limpiar</a></div>

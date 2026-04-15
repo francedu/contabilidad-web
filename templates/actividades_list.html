@@ -18,14 +18,21 @@
   <div class="col-md-4"><div class="card shadow-sm h-100"><div class="card-body"><div class="text-muted small">Balance total</div><div class="fs-4 fw-semibold">{{ formato_monto(resumen_general['balance']) }}</div><div class="text-muted">{{ resumen_general['cantidad_actividades'] }} actividad(es)</div></div></div></div>
 </div>
 
+
+<div class="card shadow-sm mb-3 filter-card"><div class="card-body"><form class="row g-2 align-items-end">
+  {% include "_admin_course_filter.html" %}
+  <div class="col-md-3"><label class="form-label">Filtro rápido en pantalla</label><input class="form-control" placeholder="Nombre, curso o fecha" data-table-filter="#tabla-actividades"></div>
+  <div class="col-auto"><button class="btn btn-outline-secondary">Aplicar</button></div>
+  <div class="col-auto"><a class="btn btn-outline-light border" href="{{ url_for('actividades_list') }}">Limpiar</a></div>
+</form></div></div>
 <div class="card shadow-sm">
   <div class="card-body p-0">
-    <div class="table-responsive">
+    <div class="table-responsive" id="tabla-actividades">
       <table class="table table-hover mb-0 align-middle">
         <thead><tr><th>Nombre</th><th>Curso</th><th>Fecha</th><th>Descripción</th><th class="text-end">Ingresos</th><th class="text-end">Egresos</th><th class="text-end">Balance</th><th class="text-center">Movs.</th><th></th></tr></thead>
         <tbody>
         {% for a in actividades %}
-          <tr>
+          <tr data-filter-row data-filter-text="{{ a['nombre'] }} {{ a['curso'] or '' }} {{ a['fecha'] }} {{ a['descripcion'] or '' }}">
             <td class="fw-semibold">{{ a['nombre'] }}</td>
             <td>{{ a['curso'] or '-' }}</td>
             <td>{{ a['fecha'] }}</td>
@@ -51,6 +58,7 @@
         {% else %}
           <tr><td colspan="9" class="text-center text-muted py-4">Sin actividades.</td></tr>
         {% endfor %}
+        <tr class="d-none"><td colspan="9" class="text-center text-muted py-4" data-empty-search>No hay resultados para ese filtro rápido.</td></tr>
         </tbody>
       </table>
     </div>
