@@ -426,7 +426,7 @@ def create_app() -> Flask:
         resumen = db.fetchone(resumen_sql, resumen_params)
 
         reporte_sql = """
-            SELECT substr(fecha, 1, 7) AS mes,
+            SELECT substr(m.fecha, 1, 7) AS mes,
                    COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN monto ELSE 0 END), 0) AS ingresos,
                    COALESCE(SUM(CASE WHEN tipo = 'gasto' THEN monto ELSE 0 END), 0) AS gastos
             FROM movimientos m
@@ -436,7 +436,7 @@ def create_app() -> Flask:
         """
         reporte_params: list[Any] = []
         reporte_sql, reporte_params = movimientos_course_filter_sql(reporte_sql, reporte_params)
-        reporte_sql += ' GROUP BY substr(fecha, 1, 7) ORDER BY mes ASC'
+        reporte_sql += ' GROUP BY substr(m.fecha, 1, 7) ORDER BY mes ASC'
         reporte = db.fetchall(reporte_sql, reporte_params)
         mes = request.args.get('mes') or datetime.today().strftime('%Y-%m')
         alertas = obtener_alertas_morosidad(db, mes, current_course_filter())
@@ -460,7 +460,7 @@ def create_app() -> Flask:
             FROM movimientos m
             LEFT JOIN actividades a ON a.id = m.actividad_id
             LEFT JOIN alumnos al ON al.id = m.alumno_id
-            WHERE substr(fecha, 1, 7) = ?
+            WHERE substr(m.fecha, 1, 7) = ?
         """
         resumen_mes_params: list[Any] = [mes]
         resumen_mes_sql, resumen_mes_params = movimientos_course_filter_sql(resumen_mes_sql, resumen_mes_params)
