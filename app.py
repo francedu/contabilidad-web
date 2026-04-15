@@ -41,7 +41,7 @@ BACKUP_DIR.mkdir(exist_ok=True)
 
 SCHOOL_NAME = 'Escuela Las Mercedes'
 SCHOOL_LOCATION = 'María Pinto'
-ALLOWED_ROLES = ('admin', 'tesorero', 'solo_lectura')
+ALLOWED_ROLES = ('admin', 'tesorero', 'apoderado', 'solo_lectura')
 
 
 class User(UserMixin):
@@ -51,6 +51,7 @@ class User(UserMixin):
         self.password_hash = row['password_hash']
         self.role = row['role']
         self.nombre = row['nombre']
+        self.curso = row['curso'] if 'curso' in row.keys() else None
         self.activo = bool(row['activo'])
 
     def can_edit(self) -> bool:
@@ -145,6 +146,7 @@ def create_app() -> Flask:
             'current_user': current_user,
             'backup_dir': BACKUP_DIR,
             'db_engine': 'PostgreSQL' if is_postgres_url(app.config['DATABASE']) else 'SQLite',
+            'current_scope_course': (current_user.curso if getattr(current_user, 'is_authenticated', False) and getattr(current_user, 'role', None) != 'admin' else None),
         }
 
     def get_db() -> DBAdapter:
@@ -182,6 +184,87 @@ def create_app() -> Flask:
             return wrapper
         return decorator
 
+    def normalize_course(curso: str | None) -> str:
+        return (curso or '').strip().lower()
+
+    def user_course_scope() -> str | None:
+        if not current_user.is_authenticated or current_user.role == 'admin':
+            return None
+        curso = (getattr(current_user, 'curso', None) or '').strip()
+        return curso or None
+
+    def course_filter_sql(sql: str, params: list[Any], alias: str, column: str = 'curso') -> tuple[str, list[Any]]:
+        curso = user_course_scope()
+        if curso:
+            sql += f" AND lower(trim(COALESCE({alias}.{column}, ''))) = lower(trim(?))"
+            params.append(curso)
+        return sql, params
+
+    def ensure_course_access(curso: str | None) -> bool:
+        scope = user_course_scope()
+        if not scope:
+            return True
+        return normalize_course(scope) == normalize_course(curso)
+
+    def fetch_alumno_permitido(db: DBAdapter, alumno_id: int):
+        alumno = db.fetchone('SELECT * FROM alumnos WHERE id = ?', (alumno_id,))
+        if alumno and ensure_course_access(alumno['curso']):
+            return alumno
+        return None
+
+    def fetch_pago_permitido(db: DBAdapter, pago_id: int):
+        pago = db.fetchone(
+            """
+            SELECT p.*, a.curso AS curso_alumno
+            FROM pagos_alumnos p
+            INNER JOIN alumnos a ON a.id = p.alumno_id
+            WHERE p.id = ?
+            """,
+            (pago_id,),
+        )
+        if pago and ensure_course_access(pago['curso_alumno']):
+            return pago
+        return None
+
+    def fetch_movimiento_permitido(db: DBAdapter, movimiento_id: int):
+        movimiento = db.fetchone(
+            """
+            SELECT m.*, COALESCE(m.curso, al.curso, ac.curso) AS curso_ref
+            FROM movimientos m
+            LEFT JOIN alumnos al ON al.id = m.alumno_id
+            LEFT JOIN actividades ac ON ac.id = m.actividad_id
+            WHERE m.id = ?
+            """,
+            (movimiento_id,),
+        )
+        if movimiento and ensure_course_access(movimiento['curso_ref']):
+            return movimiento
+        return None
+
+    def fetch_actividad_permitida(db: DBAdapter, actividad_id: int):
+        actividad = db.fetchone('SELECT * FROM actividades WHERE id = ?', (actividad_id,))
+        if actividad and ensure_course_access(actividad['curso']):
+            return actividad
+        return None
+
+    def resolver_curso_operacion(db: DBAdapter, alumno_id: int | None = None, actividad_id: int | None = None, curso_form: str | None = None) -> str | None:
+        curso = (curso_form or '').strip() or user_course_scope()
+        if alumno_id:
+            alumno = fetch_alumno_permitido(db, alumno_id)
+            if not alumno:
+                raise ValueError('Alumno no encontrado para tu curso.')
+            curso = alumno['curso']
+        if actividad_id:
+            actividad = fetch_actividad_permitida(db, actividad_id)
+            if not actividad:
+                raise ValueError('Actividad no encontrada para tu curso.')
+            if curso and normalize_course(curso) != normalize_course(actividad['curso']):
+                raise ValueError('El curso del movimiento no coincide con el de la actividad.')
+            curso = actividad['curso']
+        if user_course_scope() and not ensure_course_access(curso):
+            raise ValueError('No puedes registrar información en otro curso.')
+        return curso
+
     @app.route('/login', methods=['GET', 'POST'])
     def login():
         if current_user.is_authenticated:
@@ -218,51 +301,59 @@ def create_app() -> Flask:
     @login_required
     def dashboard():
         db = get_db()
-        resumen = db.fetchone(
-            """
+        resumen_sql = """
             SELECT
                 COALESCE(SUM(CASE WHEN tipo='ingreso' THEN monto ELSE 0 END),0) ingresos,
                 COALESCE(SUM(CASE WHEN tipo='gasto' THEN monto ELSE 0 END),0) gastos,
                 COUNT(*) cantidad
-            FROM movimientos
-            """
-        )
-        reporte = db.fetchall(
-            """
+            FROM movimientos m
+            WHERE 1=1
+        """
+        resumen_params: list[Any] = []
+        resumen_sql, resumen_params = course_filter_sql(resumen_sql, resumen_params, 'm')
+        resumen = db.fetchone(resumen_sql, resumen_params)
+
+        reporte_sql = """
             SELECT substr(fecha, 1, 7) AS mes,
                    COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN monto ELSE 0 END), 0) AS ingresos,
                    COALESCE(SUM(CASE WHEN tipo = 'gasto' THEN monto ELSE 0 END), 0) AS gastos
-            FROM movimientos
-            GROUP BY substr(fecha, 1, 7)
-            ORDER BY mes ASC
-            """
-        )
+            FROM movimientos m
+            WHERE 1=1
+        """
+        reporte_params: list[Any] = []
+        reporte_sql, reporte_params = course_filter_sql(reporte_sql, reporte_params, 'm')
+        reporte_sql += ' GROUP BY substr(fecha, 1, 7) ORDER BY mes ASC'
+        reporte = db.fetchall(reporte_sql, reporte_params)
         mes = request.args.get('mes') or datetime.today().strftime('%Y-%m')
-        alertas = obtener_alertas_morosidad(db, mes)
-        ultimos = db.fetchall(
-            """
+        alertas = obtener_alertas_morosidad(db, mes, user_course_scope())
+        ultimos_sql = """
             SELECT m.id, m.fecha, m.tipo, m.concepto, m.monto, COALESCE(a.nombre, '-') AS actividad
             FROM movimientos m
             LEFT JOIN actividades a ON a.id = m.actividad_id
-            ORDER BY m.fecha DESC, m.id DESC
-            LIMIT 8
-            """
-        )
+            WHERE 1=1
+        """
+        ultimos_params: list[Any] = []
+        ultimos_sql, ultimos_params = course_filter_sql(ultimos_sql, ultimos_params, 'm')
+        ultimos_sql += ' ORDER BY m.fecha DESC, m.id DESC LIMIT 8'
+        ultimos = db.fetchall(ultimos_sql, ultimos_params)
         backups = listar_backups()[:5]
 
-        resumen_mes = db.fetchone(
-            """
+        resumen_mes_sql = """
             SELECT
                 COALESCE(SUM(CASE WHEN tipo='ingreso' THEN monto ELSE 0 END),0) ingresos_mes,
                 COALESCE(SUM(CASE WHEN tipo='gasto' THEN monto ELSE 0 END),0) gastos_mes,
                 COUNT(*) movimientos_mes
-            FROM movimientos
+            FROM movimientos m
             WHERE substr(fecha, 1, 7) = ?
-            """
-            ,(mes,)
-        )
-        alumnos_activos = db.fetchone('SELECT COUNT(*) AS total FROM alumnos WHERE activo = 1')
-        cuotas = resumen_cuotas_por_alumno(db, mes)
+        """
+        resumen_mes_params: list[Any] = [mes]
+        resumen_mes_sql, resumen_mes_params = course_filter_sql(resumen_mes_sql, resumen_mes_params, 'm')
+        resumen_mes = db.fetchone(resumen_mes_sql, resumen_mes_params)
+        alumnos_sql = 'SELECT COUNT(*) AS total FROM alumnos a WHERE activo = 1'
+        alumnos_params: list[Any] = []
+        alumnos_sql, alumnos_params = course_filter_sql(alumnos_sql, alumnos_params, 'a')
+        alumnos_activos = db.fetchone(alumnos_sql, alumnos_params)
+        cuotas = resumen_cuotas_por_alumno(db, mes, user_course_scope())
         total_esperado = sum(float(f['cuota_mensual']) for f in cuotas if f['activo'])
         total_pagado = sum(float(f['pagado']) for f in cuotas if f['activo'])
         deuda_total = sum(max(float(f['cuota_mensual']) - float(f['pagado']), 0) for f in cuotas if f['activo'])
@@ -390,7 +481,7 @@ def create_app() -> Flask:
     @role_required('admin')
     def usuarios_list():
         db = get_db()
-        usuarios = db.fetchall('SELECT id, username, nombre, role, activo FROM usuarios ORDER BY nombre, username')
+        usuarios = db.fetchall('SELECT id, username, nombre, role, curso, activo FROM usuarios ORDER BY COALESCE(curso, \'\'), nombre, username')
         return render_template('usuarios_list.html', usuarios=usuarios)
 
     @app.route('/usuarios/nuevo', methods=['GET', 'POST'])
@@ -402,17 +493,20 @@ def create_app() -> Flask:
             username = request.form.get('username', '').strip().lower()
             password = request.form.get('password', '')
             role = request.form.get('role', 'solo_lectura')
+            curso = request.form.get('curso', '').strip()
             activo = 1 if request.form.get('activo') == 'on' else 0
             if not nombre or not username or not password:
                 flash('Nombre, usuario y contraseña son obligatorios.', 'danger')
             elif role not in ALLOWED_ROLES:
                 flash('Rol inválido.', 'danger')
+            elif role != 'admin' and not curso:
+                flash('Debes indicar el curso para este usuario.', 'danger')
             elif db.fetchone('SELECT 1 FROM usuarios WHERE lower(username)=?', (username,)):
                 flash('Ese nombre de usuario ya existe.', 'danger')
             else:
                 db.execute(
-                    'INSERT INTO usuarios (username, password_hash, role, nombre, activo) VALUES (?, ?, ?, ?, ?)',
-                    (username, generate_password_hash(password), role, nombre, activo)
+                    'INSERT INTO usuarios (username, password_hash, role, nombre, curso, activo) VALUES (?, ?, ?, ?, ?, ?)',
+                    (username, generate_password_hash(password), role, nombre, curso or None, activo)
                 )
                 db.commit()
                 flash('Usuario creado.', 'success')
@@ -423,7 +517,7 @@ def create_app() -> Flask:
     @role_required('admin')
     def usuarios_edit(user_id: int):
         db = get_db()
-        usuario = db.fetchone('SELECT id, username, role, nombre, activo FROM usuarios WHERE id=?', (user_id,))
+        usuario = db.fetchone('SELECT id, username, role, nombre, curso, activo FROM usuarios WHERE id=?', (user_id,))
         if not usuario:
             flash('Usuario no encontrado.', 'danger')
             return redirect(url_for('usuarios_list'))
@@ -432,20 +526,23 @@ def create_app() -> Flask:
             username = request.form.get('username', '').strip().lower()
             password = request.form.get('password', '')
             role = request.form.get('role', 'solo_lectura')
+            curso = request.form.get('curso', '').strip()
             activo = 1 if request.form.get('activo') == 'on' else 0
             if not nombre or not username:
                 flash('Nombre y usuario son obligatorios.', 'danger')
             elif role not in ALLOWED_ROLES:
                 flash('Rol inválido.', 'danger')
+            elif role != 'admin' and not curso:
+                flash('Debes indicar el curso para este usuario.', 'danger')
             elif db.fetchone('SELECT 1 FROM usuarios WHERE lower(username)=? AND id<>?', (username, user_id)):
                 flash('Ese nombre de usuario ya existe.', 'danger')
             else:
                 if password:
-                    db.execute('UPDATE usuarios SET nombre=?, username=?, role=?, activo=?, password_hash=? WHERE id=?',
-                               (nombre, username, role, activo, generate_password_hash(password), user_id))
+                    db.execute('UPDATE usuarios SET nombre=?, username=?, role=?, curso=?, activo=?, password_hash=? WHERE id=?',
+                               (nombre, username, role, curso or None, activo, generate_password_hash(password), user_id))
                 else:
-                    db.execute('UPDATE usuarios SET nombre=?, username=?, role=?, activo=? WHERE id=?',
-                               (nombre, username, role, activo, user_id))
+                    db.execute('UPDATE usuarios SET nombre=?, username=?, role=?, curso=?, activo=? WHERE id=?',
+                               (nombre, username, role, curso or None, activo, user_id))
                 db.commit()
                 flash('Usuario actualizado.', 'success')
                 return redirect(url_for('usuarios_list'))
@@ -477,11 +574,12 @@ def create_app() -> Flask:
             WHERE 1=1
         """
         params: list[Any] = [mes]
+        sql, params = course_filter_sql(sql, params, 'a')
         if q:
             sql += " AND (LOWER(COALESCE(a.nombre, '')) LIKE ? OR LOWER(COALESCE(a.curso, '')) LIKE ?)"
             like = sql_like_ci(q)
             params.extend([like, like])
-        sql += ' GROUP BY a.id, a.nombre, a.curso, a.cuota_mensual, a.activo ORDER BY a.nombre'
+        sql += ' GROUP BY a.id, a.nombre, a.curso, a.cuota_mensual, a.activo ORDER BY a.curso, a.nombre'
         alumnos = db.fetchall(sql, params)
         deuda_total = sum(max(float(a['cuota_mensual']) - float(a['pagado_mes']), 0) for a in alumnos if a['activo'])
         return render_template('alumnos_list.html', alumnos=alumnos, q=q, mes=mes, deuda_total=deuda_total)
@@ -492,7 +590,7 @@ def create_app() -> Flask:
         db = get_db()
         if request.method == 'POST':
             nombre = request.form.get('nombre', '').strip()
-            curso = request.form.get('curso', '').strip()
+            curso = (request.form.get('curso', '').strip() or user_course_scope() or '').strip()
             cuota = parse_float(request.form.get('cuota_mensual', '0'))
             apoderado = request.form.get('apoderado', '').strip()
             telefono = request.form.get('telefono', '').strip()
@@ -501,6 +599,8 @@ def create_app() -> Flask:
             activo = 1 if request.form.get('activo') == 'on' else 0
             if not nombre:
                 flash('El nombre es obligatorio.', 'danger')
+            elif user_course_scope() and not ensure_course_access(curso):
+                flash('No puedes crear alumnos en otro curso.', 'danger')
             elif alumno_duplicado(db, nombre, curso):
                 flash('Ya existe un alumno con ese nombre y curso.', 'danger')
             else:
@@ -517,13 +617,13 @@ def create_app() -> Flask:
     @role_required('admin', 'tesorero')
     def alumnos_edit(alumno_id: int):
         db = get_db()
-        alumno = db.fetchone('SELECT * FROM alumnos WHERE id = ?', (alumno_id,))
+        alumno = fetch_alumno_permitido(db, alumno_id)
         if not alumno:
             flash('Alumno no encontrado.', 'danger')
             return redirect(url_for('alumnos_list'))
         if request.method == 'POST':
             nombre = request.form.get('nombre', '').strip()
-            curso = request.form.get('curso', '').strip()
+            curso = (request.form.get('curso', '').strip() or user_course_scope() or '').strip()
             cuota = parse_float(request.form.get('cuota_mensual', '0'))
             apoderado = request.form.get('apoderado', '').strip()
             telefono = request.form.get('telefono', '').strip()
@@ -532,6 +632,8 @@ def create_app() -> Flask:
             activo = 1 if request.form.get('activo') == 'on' else 0
             if not nombre:
                 flash('El nombre es obligatorio.', 'danger')
+            elif user_course_scope() and not ensure_course_access(curso):
+                flash('No puedes mover alumnos a otro curso.', 'danger')
             elif alumno_duplicado(db, nombre, curso, exclude_id=alumno_id):
                 flash('Ya existe otro alumno con ese nombre y curso.', 'danger')
             else:
@@ -548,7 +650,7 @@ def create_app() -> Flask:
     @role_required('admin', 'tesorero')
     def alumnos_delete(alumno_id: int):
         db = get_db()
-        alumno = db.fetchone('SELECT nombre FROM alumnos WHERE id=?', (alumno_id,))
+        alumno = fetch_alumno_permitido(db, alumno_id)
         if not alumno:
             flash('Alumno no encontrado.', 'danger')
             return redirect(url_for('alumnos_list'))
@@ -562,7 +664,7 @@ def create_app() -> Flask:
     @login_required
     def alumno_detail(alumno_id: int):
         db = get_db()
-        alumno = db.fetchone('SELECT * FROM alumnos WHERE id = ?', (alumno_id,))
+        alumno = fetch_alumno_permitido(db, alumno_id)
         if not alumno:
             flash('Alumno no encontrado.', 'danger')
             return redirect(url_for('alumnos_list'))
@@ -653,6 +755,7 @@ def create_app() -> Flask:
             WHERE 1=1
         """
         params: list[Any] = []
+        sql, params = course_filter_sql(sql, params, 'a')
         if mes:
             sql += ' AND p.mes = ?'
             params.append(mes)
@@ -664,8 +767,16 @@ def create_app() -> Flask:
     @role_required('admin', 'tesorero')
     def pagos_new():
         db = get_db()
-        alumnos = db.fetchall('SELECT id, nombre, curso, cuota_mensual FROM alumnos WHERE activo = 1 ORDER BY nombre')
-        actividades = db.fetchall('SELECT id, nombre, fecha FROM actividades ORDER BY fecha DESC, nombre')
+        alumnos_sql = 'SELECT id, nombre, curso, cuota_mensual FROM alumnos a WHERE activo = 1'
+        alumnos_params: list[Any] = []
+        alumnos_sql, alumnos_params = course_filter_sql(alumnos_sql, alumnos_params, 'a')
+        alumnos_sql += ' ORDER BY a.curso, a.nombre'
+        alumnos = db.fetchall(alumnos_sql, alumnos_params)
+        actividades_sql = 'SELECT id, nombre, fecha, curso FROM actividades a WHERE 1=1'
+        actividades_params: list[Any] = []
+        actividades_sql, actividades_params = course_filter_sql(actividades_sql, actividades_params, 'a')
+        actividades_sql += ' ORDER BY fecha DESC, nombre'
+        actividades = db.fetchall(actividades_sql, actividades_params)
         if request.method == 'POST':
             alumno_id = int(request.form.get('alumno_id', '0') or 0)
             fecha = request.form.get('fecha', '').strip()
@@ -685,6 +796,8 @@ def create_app() -> Flask:
                 flash('Debes seleccionar una actividad para un aporte.', 'danger')
             elif tipo_pago == 'cuota_mensual' and pago_duplicado(db, alumno_id, mes):
                 flash('Ese alumno ya tiene un pago registrado para ese mes.', 'danger')
+            elif not fetch_alumno_permitido(db, alumno_id):
+                flash('Alumno no encontrado para tu curso.', 'danger')
             else:
                 registrar_pago_alumno(db, alumno_id, fecha, mes, monto, observacion, actividad_id, tipo_pago)
                 db.commit()
@@ -696,12 +809,20 @@ def create_app() -> Flask:
     @role_required('admin', 'tesorero')
     def pagos_edit(pago_id: int):
         db = get_db()
-        pago = db.fetchone('SELECT * FROM pagos_alumnos WHERE id=?', (pago_id,))
+        pago = fetch_pago_permitido(db, pago_id)
         if not pago:
             flash('Pago no encontrado.', 'danger')
             return redirect(url_for('pagos_list'))
-        alumnos = db.fetchall('SELECT id, nombre, curso, cuota_mensual FROM alumnos WHERE activo = 1 OR id = ? ORDER BY nombre', (pago['alumno_id'],))
-        actividades = db.fetchall('SELECT id, nombre, fecha FROM actividades ORDER BY fecha DESC, nombre')
+        alumnos_sql = 'SELECT id, nombre, curso, cuota_mensual FROM alumnos a WHERE (activo = 1 OR id = ?)'
+        alumnos_params: list[Any] = [pago['alumno_id']]
+        alumnos_sql, alumnos_params = course_filter_sql(alumnos_sql, alumnos_params, 'a')
+        alumnos_sql += ' ORDER BY a.curso, a.nombre'
+        alumnos = db.fetchall(alumnos_sql, alumnos_params)
+        actividades_sql = 'SELECT id, nombre, fecha, curso FROM actividades a WHERE 1=1'
+        actividades_params: list[Any] = []
+        actividades_sql, actividades_params = course_filter_sql(actividades_sql, actividades_params, 'a')
+        actividades_sql += ' ORDER BY fecha DESC, nombre'
+        actividades = db.fetchall(actividades_sql, actividades_params)
         if request.method == 'POST':
             alumno_id = int(request.form.get('alumno_id', '0') or 0)
             fecha = request.form.get('fecha', '').strip()
@@ -714,13 +835,16 @@ def create_app() -> Flask:
             except Exception:
                 flash('Fecha o mes inválido.', 'danger')
                 return render_template('pagos_form.html', alumnos=alumnos, actividades=actividades, pago=pago)
-            if db.fetchone('SELECT 1 FROM pagos_alumnos WHERE alumno_id=? AND mes=? AND id<>?', (alumno_id, mes, pago_id)):
+            alumno = fetch_alumno_permitido(db, alumno_id)
+            if not alumno:
+                flash('Alumno no encontrado para tu curso.', 'danger')
+            elif db.fetchone('SELECT 1 FROM pagos_alumnos WHERE alumno_id=? AND mes=? AND id<>?', (alumno_id, mes, pago_id)):
                 flash('Ese alumno ya tiene otro pago registrado para ese mes.', 'danger')
             else:
                 db.execute('UPDATE pagos_alumnos SET alumno_id=?, fecha=?, mes=?, monto=?, observacion=? WHERE id=?',
                            (alumno_id, fecha, mes, monto, observacion, pago_id))
-                db.execute('UPDATE movimientos SET fecha=?, concepto=?, monto=?, alumno_id=?, observacion=? WHERE id=?',
-                           (fecha, f'Cuota mensual alumno: {obtener_nombre_alumno(db, alumno_id)} ({mes})', monto, alumno_id, observacion, pago['movimiento_id']))
+                db.execute('UPDATE movimientos SET fecha=?, concepto=?, monto=?, alumno_id=?, observacion=?, curso=? WHERE id=?',
+                           (fecha, f'Cuota mensual alumno: {obtener_nombre_alumno(db, alumno_id)} ({mes})', monto, alumno_id, observacion, alumno['curso'], pago['movimiento_id']))
                 db.commit()
                 flash('Pago actualizado.', 'success')
                 return redirect(url_for('pagos_list'))
@@ -730,7 +854,7 @@ def create_app() -> Flask:
     @role_required('admin', 'tesorero')
     def pagos_delete(pago_id: int):
         db = get_db()
-        pago = db.fetchone('SELECT * FROM pagos_alumnos WHERE id=?', (pago_id,))
+        pago = fetch_pago_permitido(db, pago_id)
         if not pago:
             flash('Pago no encontrado.', 'danger')
             return redirect(url_for('pagos_list'))
@@ -752,17 +876,33 @@ def create_app() -> Flask:
         fecha_hasta = request.args.get('fecha_hasta', '').strip()
         actividad_id = request.args.get('actividad_id', '').strip()
         alumno_id = request.args.get('alumno_id', '').strip()
-        movimientos = obtener_movimientos_filtrados(db, tipo=tipo, mes=mes, q=q, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, actividad_id=actividad_id, alumno_id=alumno_id)
-        actividades = db.fetchall('SELECT id, nombre, fecha FROM actividades ORDER BY fecha DESC, nombre')
-        alumnos = db.fetchall('SELECT id, nombre, curso FROM alumnos WHERE activo = 1 ORDER BY nombre')
+        movimientos = obtener_movimientos_filtrados(db, tipo=tipo, mes=mes, q=q, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, actividad_id=actividad_id, alumno_id=alumno_id, curso_scope=user_course_scope())
+        actividades_sql = 'SELECT id, nombre, fecha, curso FROM actividades a WHERE 1=1'
+        actividades_params: list[Any] = []
+        actividades_sql, actividades_params = course_filter_sql(actividades_sql, actividades_params, 'a')
+        actividades_sql += ' ORDER BY fecha DESC, nombre'
+        actividades = db.fetchall(actividades_sql, actividades_params)
+        alumnos_sql = 'SELECT id, nombre, curso FROM alumnos a WHERE activo = 1'
+        alumnos_params: list[Any] = []
+        alumnos_sql, alumnos_params = course_filter_sql(alumnos_sql, alumnos_params, 'a')
+        alumnos_sql += ' ORDER BY a.curso, a.nombre'
+        alumnos = db.fetchall(alumnos_sql, alumnos_params)
         return render_template('movimientos_list.html', movimientos=movimientos, tipo=tipo, mes=mes, q=q, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, actividad_id=actividad_id, alumno_id=alumno_id, actividades=actividades, alumnos=alumnos)
 
     @app.route('/movimientos/nuevo', methods=['GET', 'POST'])
     @role_required('admin', 'tesorero')
     def movimientos_new():
         db = get_db()
-        actividades = db.fetchall('SELECT id, nombre, fecha FROM actividades ORDER BY fecha DESC, nombre')
-        alumnos = db.fetchall('SELECT id, nombre, curso FROM alumnos WHERE activo = 1 ORDER BY nombre')
+        actividades_sql = 'SELECT id, nombre, fecha, curso FROM actividades a WHERE 1=1'
+        actividades_params: list[Any] = []
+        actividades_sql, actividades_params = course_filter_sql(actividades_sql, actividades_params, 'a')
+        actividades_sql += ' ORDER BY fecha DESC, nombre'
+        actividades = db.fetchall(actividades_sql, actividades_params)
+        alumnos_sql = 'SELECT id, nombre, curso FROM alumnos a WHERE activo = 1'
+        alumnos_params: list[Any] = []
+        alumnos_sql, alumnos_params = course_filter_sql(alumnos_sql, alumnos_params, 'a')
+        alumnos_sql += ' ORDER BY a.curso, a.nombre'
+        alumnos = db.fetchall(alumnos_sql, alumnos_params)
         if request.method == 'POST':
             fecha = request.form.get('fecha', '').strip()
             tipo = request.form.get('tipo', 'ingreso').strip()
@@ -773,14 +913,20 @@ def create_app() -> Flask:
             alumno_raw = request.form.get('alumno_id', '').strip()
             alumno_id = int(alumno_raw) if alumno_raw else None
             observacion = request.form.get('observacion', '').strip()
+            curso_form = request.form.get('curso', '').strip()
             try:
                 validar_fecha(fecha)
             except Exception:
                 flash('Fecha inválida.', 'danger')
                 return render_template('movimientos_form.html', actividades=actividades, alumnos=alumnos, movimiento=None)
+            try:
+                curso = resolver_curso_operacion(db, alumno_id, actividad_id, curso_form)
+            except ValueError as exc:
+                flash(str(exc), 'danger')
+                return render_template('movimientos_form.html', actividades=actividades, alumnos=alumnos, movimiento=None)
             db.execute(
-                'INSERT INTO movimientos (fecha, tipo, concepto, monto, actividad_id, alumno_id, observacion, origen) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                (fecha, tipo, concepto, monto, actividad_id, alumno_id, observacion, 'general'),
+                'INSERT INTO movimientos (fecha, tipo, concepto, monto, actividad_id, alumno_id, observacion, origen, curso) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                (fecha, tipo, concepto, monto, actividad_id, alumno_id, observacion, 'general', curso),
             )
             db.commit()
             flash('Movimiento creado.', 'success')
@@ -792,12 +938,20 @@ def create_app() -> Flask:
     @role_required('admin', 'tesorero')
     def movimientos_edit(movimiento_id: int):
         db = get_db()
-        movimiento = db.fetchone('SELECT * FROM movimientos WHERE id=?', (movimiento_id,))
+        movimiento = fetch_movimiento_permitido(db, movimiento_id)
         if not movimiento:
             flash('Movimiento no encontrado.', 'danger')
             return redirect(url_for('movimientos_list'))
-        actividades = db.fetchall('SELECT id, nombre, fecha FROM actividades ORDER BY fecha DESC, nombre')
-        alumnos = db.fetchall('SELECT id, nombre, curso FROM alumnos WHERE activo = 1 OR id = ? ORDER BY nombre', (movimiento['alumno_id'] or 0,))
+        actividades_sql = 'SELECT id, nombre, fecha, curso FROM actividades a WHERE 1=1'
+        actividades_params: list[Any] = []
+        actividades_sql, actividades_params = course_filter_sql(actividades_sql, actividades_params, 'a')
+        actividades_sql += ' ORDER BY fecha DESC, nombre'
+        actividades = db.fetchall(actividades_sql, actividades_params)
+        alumnos_sql = 'SELECT id, nombre, curso FROM alumnos a WHERE (activo = 1 OR id = ?)'
+        alumnos_params: list[Any] = [movimiento['alumno_id'] or 0]
+        alumnos_sql, alumnos_params = course_filter_sql(alumnos_sql, alumnos_params, 'a')
+        alumnos_sql += ' ORDER BY a.curso, a.nombre'
+        alumnos = db.fetchall(alumnos_sql, alumnos_params)
         if request.method == 'POST':
             fecha = request.form.get('fecha', '').strip()
             tipo = request.form.get('tipo', 'ingreso').strip()
@@ -808,13 +962,19 @@ def create_app() -> Flask:
             alumno_raw = request.form.get('alumno_id', '').strip()
             alumno_id = int(alumno_raw) if alumno_raw else None
             observacion = request.form.get('observacion', '').strip()
+            curso_form = request.form.get('curso', '').strip()
             try:
                 validar_fecha(fecha)
             except Exception:
                 flash('Fecha inválida.', 'danger')
                 return render_template('movimientos_form.html', actividades=actividades, alumnos=alumnos, movimiento=movimiento)
-            db.execute('UPDATE movimientos SET fecha=?, tipo=?, concepto=?, monto=?, actividad_id=?, alumno_id=?, observacion=? WHERE id=?',
-                       (fecha, tipo, concepto, monto, actividad_id, alumno_id, observacion, movimiento_id))
+            try:
+                curso = resolver_curso_operacion(db, alumno_id, actividad_id, curso_form)
+            except ValueError as exc:
+                flash(str(exc), 'danger')
+                return render_template('movimientos_form.html', actividades=actividades, alumnos=alumnos, movimiento=movimiento)
+            db.execute('UPDATE movimientos SET fecha=?, tipo=?, concepto=?, monto=?, actividad_id=?, alumno_id=?, observacion=?, curso=? WHERE id=?',
+                       (fecha, tipo, concepto, monto, actividad_id, alumno_id, observacion, curso, movimiento_id))
             db.commit()
             flash('Movimiento actualizado.', 'success')
             next_url = request.form.get('next', '').strip()
@@ -825,7 +985,7 @@ def create_app() -> Flask:
     @role_required('admin', 'tesorero')
     def movimientos_delete(movimiento_id: int):
         db = get_db()
-        movimiento = db.fetchone('SELECT concepto FROM movimientos WHERE id=?', (movimiento_id,))
+        movimiento = fetch_movimiento_permitido(db, movimiento_id)
         if not movimiento:
             flash('Movimiento no encontrado.', 'danger')
             return redirect(url_for('movimientos_list'))
@@ -840,12 +1000,12 @@ def create_app() -> Flask:
     @login_required
     def actividades_list():
         db = get_db()
-        actividades = db.fetchall(
-            """
+        actividades_sql = """
             SELECT
                 a.id,
                 a.nombre,
                 a.fecha,
+                COALESCE(a.curso, '') AS curso,
                 COALESCE(a.descripcion, '') AS descripcion,
                 COALESCE(SUM(CASE WHEN m.tipo = 'ingreso' THEN m.monto ELSE 0 END), 0) AS ingresos,
                 COALESCE(SUM(CASE WHEN m.tipo = 'gasto' THEN m.monto ELSE 0 END), 0) AS egresos,
@@ -853,10 +1013,12 @@ def create_app() -> Flask:
                 COALESCE(SUM(CASE WHEN m.tipo = 'gasto' THEN 1 ELSE 0 END), 0) AS cantidad_egresos
             FROM actividades a
             LEFT JOIN movimientos m ON m.actividad_id = a.id
-            GROUP BY a.id, a.nombre, a.fecha, a.descripcion
-            ORDER BY a.fecha DESC, a.nombre
-            """
-        )
+            WHERE 1=1
+        """
+        actividades_params: list[Any] = []
+        actividades_sql, actividades_params = course_filter_sql(actividades_sql, actividades_params, 'a')
+        actividades_sql += ' GROUP BY a.id, a.nombre, a.fecha, a.curso, a.descripcion ORDER BY a.fecha DESC, a.nombre'
+        actividades = db.fetchall(actividades_sql, actividades_params)
         resumen_general = {
             'ingresos': sum(float(a['ingresos'] or 0) for a in actividades),
             'egresos': sum(float(a['egresos'] or 0) for a in actividades),
@@ -870,20 +1032,21 @@ def create_app() -> Flask:
     def actividades_report():
         db = get_db()
         mes = request.args.get('mes') or datetime.today().strftime('%Y-%m')
-        actividades = db.fetchall(
-            """
+        actividades_sql = """
             SELECT
-                a.id, a.nombre, a.fecha, COALESCE(a.descripcion, '') AS descripcion,
+                a.id, a.nombre, a.fecha, COALESCE(a.curso, '') AS curso, COALESCE(a.descripcion, '') AS descripcion,
                 COALESCE(SUM(CASE WHEN m.tipo = 'ingreso' THEN m.monto ELSE 0 END), 0) AS ingresos,
                 COALESCE(SUM(CASE WHEN m.tipo = 'gasto' THEN m.monto ELSE 0 END), 0) AS egresos,
                 COUNT(m.id) AS movimientos
             FROM actividades a
             LEFT JOIN movimientos m ON m.actividad_id = a.id
-            GROUP BY a.id, a.nombre, a.fecha, a.descripcion
-            ORDER BY a.fecha DESC, a.nombre
-            """
-        )
-        deudas = resumen_cuotas_por_alumno(db, mes)
+            WHERE 1=1
+        """
+        actividades_params: list[Any] = []
+        actividades_sql, actividades_params = course_filter_sql(actividades_sql, actividades_params, 'a')
+        actividades_sql += ' GROUP BY a.id, a.nombre, a.fecha, a.curso, a.descripcion ORDER BY a.fecha DESC, a.nombre'
+        actividades = db.fetchall(actividades_sql, actividades_params)
+        deudas = resumen_cuotas_por_alumno(db, mes, user_course_scope())
         total_deuda = sum(max(float(f['cuota_mensual']) - float(f['pagado']), 0) for f in deudas if f['activo'])
         return render_template('actividades_report.html', actividades=actividades, mes=mes, deudas=deudas, total_deuda=total_deuda)
 
@@ -891,14 +1054,7 @@ def create_app() -> Flask:
     @login_required
     def actividad_detail(actividad_id: int):
         db = get_db()
-        actividad = db.fetchone(
-            """
-            SELECT id, nombre, fecha, COALESCE(descripcion, '') AS descripcion
-            FROM actividades
-            WHERE id = ?
-            """
-            , (actividad_id,)
-        )
+        actividad = fetch_actividad_permitida(db, actividad_id)
         if not actividad:
             flash('Actividad no encontrada.', 'danger')
             return redirect(url_for('actividades_list'))
@@ -945,13 +1101,17 @@ def create_app() -> Flask:
         if request.method == 'POST':
             nombre = request.form.get('nombre', '').strip()
             fecha = request.form.get('fecha', '').strip()
+            curso = (request.form.get('curso', '').strip() or user_course_scope() or '').strip()
             descripcion = request.form.get('descripcion', '').strip()
             try:
                 validar_fecha(fecha)
             except Exception:
                 flash('Fecha inválida.', 'danger')
                 return render_template('actividades_form.html', actividad=None)
-            db.execute('INSERT INTO actividades (nombre, fecha, descripcion) VALUES (?, ?, ?)', (nombre, fecha, descripcion))
+            if user_course_scope() and not ensure_course_access(curso):
+                flash('No puedes crear actividades en otro curso.', 'danger')
+                return render_template('actividades_form.html', actividad=None)
+            db.execute('INSERT INTO actividades (nombre, fecha, curso, descripcion) VALUES (?, ?, ?, ?)', (nombre, fecha, curso or None, descripcion))
             db.commit()
             flash('Actividad creada.', 'success')
             return redirect(url_for('actividades_list'))
@@ -961,20 +1121,24 @@ def create_app() -> Flask:
     @role_required('admin', 'tesorero')
     def actividades_edit(actividad_id: int):
         db = get_db()
-        actividad = db.fetchone('SELECT * FROM actividades WHERE id=?', (actividad_id,))
+        actividad = fetch_actividad_permitida(db, actividad_id)
         if not actividad:
             flash('Actividad no encontrada.', 'danger')
             return redirect(url_for('actividades_list'))
         if request.method == 'POST':
             nombre = request.form.get('nombre', '').strip()
             fecha = request.form.get('fecha', '').strip()
+            curso = (request.form.get('curso', '').strip() or user_course_scope() or '').strip()
             descripcion = request.form.get('descripcion', '').strip()
             try:
                 validar_fecha(fecha)
             except Exception:
                 flash('Fecha inválida.', 'danger')
                 return render_template('actividades_form.html', actividad=actividad)
-            db.execute('UPDATE actividades SET nombre=?, fecha=?, descripcion=? WHERE id=?', (nombre, fecha, descripcion, actividad_id))
+            if user_course_scope() and not ensure_course_access(curso):
+                flash('No puedes mover la actividad a otro curso.', 'danger')
+                return render_template('actividades_form.html', actividad=actividad)
+            db.execute('UPDATE actividades SET nombre=?, fecha=?, curso=?, descripcion=? WHERE id=?', (nombre, fecha, curso or None, descripcion, actividad_id))
             db.commit()
             flash('Actividad actualizada.', 'success')
             return redirect(url_for('actividades_list'))
@@ -984,7 +1148,7 @@ def create_app() -> Flask:
     @role_required('admin', 'tesorero')
     def actividades_delete(actividad_id: int):
         db = get_db()
-        actividad = db.fetchone('SELECT nombre FROM actividades WHERE id=?', (actividad_id,))
+        actividad = fetch_actividad_permitida(db, actividad_id)
         if not actividad:
             flash('Actividad no encontrada.', 'danger')
             return redirect(url_for('actividades_list'))
@@ -1005,11 +1169,11 @@ def create_app() -> Flask:
             filtro_reporte = 'deuda'
 
         if exportar == 'pdf':
-            pdf_buffer = construir_pdf_deudores(db, mes, filtro_reporte)
+            pdf_buffer = construir_pdf_deudores(db, mes, filtro_reporte, user_course_scope())
             filename = f'reporte_cuotas_{filtro_reporte}_{mes}.pdf'
             return send_file(pdf_buffer, mimetype='application/pdf', as_attachment=True, download_name=filename)
 
-        filas = resumen_cuotas_por_alumno(db, mes)
+        filas = resumen_cuotas_por_alumno(db, mes, user_course_scope())
         if filtro_reporte == 'deuda':
             filas = [
                 fila for fila in filas
@@ -1019,7 +1183,7 @@ def create_app() -> Flask:
         total_esperado = sum(float(x['cuota_mensual']) for x in filas if x['activo'])
         total_pagado = sum(float(x['pagado']) for x in filas)
         total_debe = sum(max(float(x['cuota_mensual']) - float(x['pagado']), 0) for x in filas if x['activo'])
-        alertas = obtener_alertas_morosidad(db, mes)
+        alertas = obtener_alertas_morosidad(db, mes, user_course_scope())
         if filtro_reporte == 'deuda':
             alertas = [alerta for alerta in alertas if alerta['debe'] > 0]
         return render_template(
@@ -1051,7 +1215,7 @@ def sql_like_ci(value: str) -> str:
     return f"%{(value or '').strip().lower()}%"
 
 
-def obtener_movimientos_filtrados(db: DBAdapter, tipo: str = 'Todos', mes: str = '', q: str = '', fecha_desde: str = '', fecha_hasta: str = '', actividad_id: str | int = '', alumno_id: str | int = ''):
+def obtener_movimientos_filtrados(db: DBAdapter, tipo: str = 'Todos', mes: str = '', q: str = '', fecha_desde: str = '', fecha_hasta: str = '', actividad_id: str | int = '', alumno_id: str | int = '', curso_scope: str | None = None):
     sql = """
         SELECT m.id, m.fecha, m.tipo, m.concepto, m.monto, COALESCE(a.nombre, '-') AS actividad,
                COALESCE(al.nombre, '-') AS alumno,
@@ -1080,6 +1244,9 @@ def obtener_movimientos_filtrados(db: DBAdapter, tipo: str = 'Todos', mes: str =
     if alumno_id:
         sql += ' AND m.alumno_id = ?'
         params.append(int(alumno_id))
+    if curso_scope:
+        sql += " AND lower(trim(COALESCE(m.curso, al.curso, ''))) = lower(trim(?))"
+        params.append(curso_scope)
     if q:
         like = sql_like_ci(q)
         sql += " AND (LOWER(COALESCE(m.concepto, '')) LIKE ? OR LOWER(COALESCE(m.observacion, '')) LIKE ? OR LOWER(COALESCE(m.fecha, '')) LIKE ? OR LOWER(COALESCE(m.origen, '')) LIKE ? OR LOWER(COALESCE(a.nombre, '')) LIKE ? OR LOWER(COALESCE(al.nombre, '')) LIKE ? OR LOWER(COALESCE(al.curso, '')) LIKE ?)"
@@ -1229,16 +1396,17 @@ def registrar_pago_alumno(db: DBAdapter, alumno_id: int, fecha: str, mes: str, m
         raise ValueError('Alumno no encontrado')
     if tipo_pago == 'cuota_mensual':
         concepto = f'Cuota mensual alumno: {alumno["nombre"]} ({mes})'
+        curso = alumno['curso']
         if db.kind == 'postgres':
             cur = db.execute(
-                'INSERT INTO movimientos (fecha, tipo, concepto, monto, actividad_id, alumno_id, observacion, origen) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
-                (fecha, 'ingreso', concepto, monto, None, alumno_id, observacion, 'cuota_mensual'),
+                'INSERT INTO movimientos (fecha, tipo, concepto, monto, actividad_id, alumno_id, observacion, origen, curso) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
+                (fecha, 'ingreso', concepto, monto, None, alumno_id, observacion, 'cuota_mensual', curso),
             )
             movimiento_id = cur.fetchone()['id']
         else:
             cur = db.execute(
-                'INSERT INTO movimientos (fecha, tipo, concepto, monto, actividad_id, alumno_id, observacion, origen) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                (fecha, 'ingreso', concepto, monto, None, alumno_id, observacion, 'cuota_mensual'),
+                'INSERT INTO movimientos (fecha, tipo, concepto, monto, actividad_id, alumno_id, observacion, origen, curso) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                (fecha, 'ingreso', concepto, monto, None, alumno_id, observacion, 'cuota_mensual', curso),
             )
             movimiento_id = cur.lastrowid
         db.execute(
@@ -1249,28 +1417,30 @@ def registrar_pago_alumno(db: DBAdapter, alumno_id: int, fecha: str, mes: str, m
         concepto = f'Aporte actividad alumno: {alumno["nombre"]}'
         detalle = observacion if observacion else f'Aporte para actividad registrado en {mes}'
         db.execute(
-            'INSERT INTO movimientos (fecha, tipo, concepto, monto, actividad_id, alumno_id, observacion, origen) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            (fecha, 'ingreso', concepto, monto, actividad_id, alumno_id, detalle, 'actividad_alumno'),
+            'INSERT INTO movimientos (fecha, tipo, concepto, monto, actividad_id, alumno_id, observacion, origen, curso) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (fecha, 'ingreso', concepto, monto, actividad_id, alumno_id, detalle, 'actividad_alumno', alumno['curso']),
         )
 
 
-def resumen_cuotas_por_alumno(db: DBAdapter, mes: str):
-    return db.fetchall(
-        """
+def resumen_cuotas_por_alumno(db: DBAdapter, mes: str, curso_scope: str | None = None):
+    sql = """
         SELECT a.id, a.nombre, a.curso, a.cuota_mensual, a.activo,
                COALESCE(SUM(CASE WHEN p.mes = ? THEN p.monto ELSE 0 END), 0) AS pagado
         FROM alumnos a
         LEFT JOIN pagos_alumnos p ON a.id = p.alumno_id
-        GROUP BY a.id, a.nombre, a.curso, a.cuota_mensual, a.activo
-        ORDER BY a.nombre
-        """,
-        (mes,),
-    )
+        WHERE 1=1
+    """
+    params: list[Any] = [mes]
+    if curso_scope:
+        sql += " AND lower(trim(COALESCE(a.curso, ''))) = lower(trim(?))"
+        params.append(curso_scope)
+    sql += ' GROUP BY a.id, a.nombre, a.curso, a.cuota_mensual, a.activo ORDER BY a.curso, a.nombre'
+    return db.fetchall(sql, params)
 
 
-def obtener_alertas_morosidad(db: DBAdapter, mes: str):
+def obtener_alertas_morosidad(db: DBAdapter, mes: str, curso_scope: str | None = None):
     alertas = []
-    for fila in resumen_cuotas_por_alumno(db, mes):
+    for fila in resumen_cuotas_por_alumno(db, mes, curso_scope):
         if not fila['activo']:
             continue
         debe = max(float(fila['cuota_mensual']) - float(fila['pagado']), 0)
@@ -1303,15 +1473,19 @@ def nombre_mes_es(numero_mes: int) -> str:
     return nombres.get(numero_mes, str(numero_mes))
 
 
-def resumen_deuda_acumulada_por_alumno(db: DBAdapter, mes_corte: str):
+def resumen_deuda_acumulada_por_alumno(db: DBAdapter, mes_corte: str, curso_scope: str | None = None):
     meses = meses_hasta_corte(mes_corte)
-    filas = db.fetchall(
-        """
+    filas_sql = """
         SELECT a.id, a.nombre, a.curso, a.cuota_mensual, a.activo
         FROM alumnos a
-        ORDER BY a.nombre
-        """
-    )
+        WHERE 1=1
+    """
+    filas_params: list[Any] = []
+    if curso_scope:
+        filas_sql += " AND lower(trim(COALESCE(a.curso, ''))) = lower(trim(?))"
+        filas_params.append(curso_scope)
+    filas_sql += ' ORDER BY a.curso, a.nombre'
+    filas = db.fetchall(filas_sql, filas_params)
     pagos_rows = db.fetchall(
         """
         SELECT p.alumno_id, p.mes, COALESCE(SUM(p.monto), 0) AS monto
@@ -1358,8 +1532,8 @@ def resumen_deuda_acumulada_por_alumno(db: DBAdapter, mes_corte: str):
     return resumen
 
 
-def construir_pdf_deudores(db: DBAdapter, mes_corte: str, modo: str = 'deuda') -> BytesIO:
-    filas = resumen_deuda_acumulada_por_alumno(db, mes_corte)
+def construir_pdf_deudores(db: DBAdapter, mes_corte: str, modo: str = 'deuda', curso_scope: str | None = None) -> BytesIO:
+    filas = resumen_deuda_acumulada_por_alumno(db, mes_corte, curso_scope)
     if modo == 'deuda':
         filas = [fila for fila in filas if fila['activo'] and fila['deuda_total'] > 0]
     else:
@@ -1437,8 +1611,8 @@ def seed_default_admin(db: DBAdapter) -> None:
     password = os.environ.get('ADMIN_PASSWORD', 'admin123')
     nombre = os.environ.get('ADMIN_NAME', 'Administrador')
     db.execute(
-        'INSERT INTO usuarios (username, password_hash, role, nombre, activo) VALUES (?, ?, ?, ?, 1)',
-        (username, generate_password_hash(password), 'admin', nombre),
+        'INSERT INTO usuarios (username, password_hash, role, nombre, curso, activo) VALUES (?, ?, ?, ?, ?, 1)',
+        (username, generate_password_hash(password), 'admin', nombre, None),
     )
     db.commit()
 
@@ -1450,6 +1624,7 @@ def init_db(db: DBAdapter) -> None:
             id BIGSERIAL PRIMARY KEY,
             nombre TEXT NOT NULL,
             fecha TEXT,
+            curso TEXT,
             descripcion TEXT
         );
 
@@ -1463,6 +1638,7 @@ def init_db(db: DBAdapter) -> None:
             alumno_id BIGINT,
             observacion TEXT,
             origen TEXT NOT NULL DEFAULT 'general',
+            curso TEXT,
             CONSTRAINT fk_mov_actividad FOREIGN KEY (actividad_id) REFERENCES actividades(id)
         );
 
@@ -1494,8 +1670,9 @@ def init_db(db: DBAdapter) -> None:
             id BIGSERIAL PRIMARY KEY,
             username TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('admin', 'tesorero', 'solo_lectura')),
+            role TEXT NOT NULL CHECK(role IN ('admin', 'tesorero', 'apoderado', 'solo_lectura')),
             nombre TEXT NOT NULL,
+            curso TEXT,
             activo INTEGER NOT NULL DEFAULT 1
         );
 
@@ -1510,6 +1687,7 @@ def init_db(db: DBAdapter) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nombre TEXT NOT NULL,
             fecha TEXT,
+            curso TEXT,
             descripcion TEXT
         );
 
@@ -1523,6 +1701,7 @@ def init_db(db: DBAdapter) -> None:
             alumno_id INTEGER,
             observacion TEXT,
             origen TEXT NOT NULL DEFAULT 'general',
+            curso TEXT,
             FOREIGN KEY (actividad_id) REFERENCES actividades(id)
         );
 
@@ -1554,8 +1733,9 @@ def init_db(db: DBAdapter) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('admin', 'tesorero', 'solo_lectura')),
+            role TEXT NOT NULL CHECK(role IN ('admin', 'tesorero', 'apoderado', 'solo_lectura')),
             nombre TEXT NOT NULL,
+            curso TEXT,
             activo INTEGER NOT NULL DEFAULT 1
         );
 
@@ -1569,29 +1749,35 @@ def init_db(db: DBAdapter) -> None:
     # Migraciones suaves para bases existentes creadas con versiones anteriores.
     if db.kind == 'postgres':
         migration_statements = [
+            'ALTER TABLE actividades ADD COLUMN IF NOT EXISTS curso TEXT',
             'ALTER TABLE actividades ADD COLUMN IF NOT EXISTS descripcion TEXT',
             'ALTER TABLE movimientos ADD COLUMN IF NOT EXISTS actividad_id BIGINT',
             'ALTER TABLE movimientos ADD COLUMN IF NOT EXISTS alumno_id BIGINT',
             "ALTER TABLE movimientos ADD COLUMN IF NOT EXISTS origen TEXT NOT NULL DEFAULT 'general'",
+            'ALTER TABLE movimientos ADD COLUMN IF NOT EXISTS curso TEXT',
             'ALTER TABLE pagos_alumnos ADD COLUMN IF NOT EXISTS observacion TEXT',
             'ALTER TABLE pagos_alumnos ADD COLUMN IF NOT EXISTS movimiento_id BIGINT',
             'ALTER TABLE alumnos ADD COLUMN IF NOT EXISTS apoderado TEXT',
             'ALTER TABLE alumnos ADD COLUMN IF NOT EXISTS telefono TEXT',
             'ALTER TABLE alumnos ADD COLUMN IF NOT EXISTS direccion TEXT',
             'ALTER TABLE alumnos ADD COLUMN IF NOT EXISTS observacion_ficha TEXT',
+            'ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS curso TEXT',
         ]
     else:
         migration_statements = [
+            'ALTER TABLE actividades ADD COLUMN curso TEXT',
             'ALTER TABLE actividades ADD COLUMN descripcion TEXT',
             'ALTER TABLE movimientos ADD COLUMN actividad_id INTEGER',
             'ALTER TABLE movimientos ADD COLUMN alumno_id INTEGER',
             "ALTER TABLE movimientos ADD COLUMN origen TEXT NOT NULL DEFAULT 'general'",
+            'ALTER TABLE movimientos ADD COLUMN curso TEXT',
             'ALTER TABLE pagos_alumnos ADD COLUMN observacion TEXT',
             'ALTER TABLE pagos_alumnos ADD COLUMN movimiento_id INTEGER',
             'ALTER TABLE alumnos ADD COLUMN apoderado TEXT',
             'ALTER TABLE alumnos ADD COLUMN telefono TEXT',
             'ALTER TABLE alumnos ADD COLUMN direccion TEXT',
             'ALTER TABLE alumnos ADD COLUMN observacion_ficha TEXT',
+            'ALTER TABLE usuarios ADD COLUMN curso TEXT',
         ]
 
     for statement in migration_statements:
@@ -1600,6 +1786,18 @@ def init_db(db: DBAdapter) -> None:
             db.commit()
         except Exception:
             db.rollback()
+
+    try:
+        db.execute("UPDATE movimientos SET curso = (SELECT curso FROM alumnos WHERE alumnos.id = movimientos.alumno_id) WHERE curso IS NULL AND alumno_id IS NOT NULL")
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    try:
+        db.execute("UPDATE actividades SET curso = (SELECT MIN(m.curso) FROM movimientos m WHERE m.actividad_id = actividades.id AND m.curso IS NOT NULL) WHERE curso IS NULL")
+        db.commit()
+    except Exception:
+        db.rollback()
     db.commit()
 
 

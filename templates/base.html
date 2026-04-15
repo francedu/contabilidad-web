@@ -27,7 +27,7 @@
         {% endif %}
       </div>
       <div class="d-flex align-items-center gap-3 text-white nav-user-meta">
-        <span>{{ current_user.nombre }} · <span class="badge text-bg-light badge-role">{{ current_user.role }}</span></span>
+        <span>{{ current_user.nombre }} · <span class="badge text-bg-light badge-role">{{ current_user.role }}</span>{% if current_scope_course %} · <span class="badge text-bg-warning">{{ current_scope_course }}</span>{% endif %}</span>
         <a class="btn btn-sm btn-outline-light" href="{{ url_for('logout') }}">Salir</a>
       </div>
     </div>
