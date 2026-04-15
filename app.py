@@ -303,6 +303,13 @@ def create_app() -> Flask:
             params.append(curso)
         return sql, params
 
+    def movimientos_course_filter_sql(sql: str, params: list[Any], movimiento_alias: str = 'm', actividad_alias: str = 'a', alumno_alias: str = 'al') -> tuple[str, list[Any]]:
+        curso = current_course_filter()
+        if curso:
+            sql += f" AND lower(trim(COALESCE({movimiento_alias}.curso, {actividad_alias}.curso, {alumno_alias}.curso, ''))) = lower(trim(?))"
+            params.append(curso)
+        return sql, params
+
     def ensure_course_access(curso: str | None) -> bool:
         scope = user_course_scope()
         if not scope:
@@ -410,10 +417,12 @@ def create_app() -> Flask:
                 COALESCE(SUM(CASE WHEN tipo='gasto' THEN monto ELSE 0 END),0) gastos,
                 COUNT(*) cantidad
             FROM movimientos m
+            LEFT JOIN actividades a ON a.id = m.actividad_id
+            LEFT JOIN alumnos al ON al.id = m.alumno_id
             WHERE 1=1
         """
         resumen_params: list[Any] = []
-        resumen_sql, resumen_params = course_filter_sql(resumen_sql, resumen_params, 'm')
+        resumen_sql, resumen_params = movimientos_course_filter_sql(resumen_sql, resumen_params)
         resumen = db.fetchone(resumen_sql, resumen_params)
 
         reporte_sql = """
@@ -421,10 +430,12 @@ def create_app() -> Flask:
                    COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN monto ELSE 0 END), 0) AS ingresos,
                    COALESCE(SUM(CASE WHEN tipo = 'gasto' THEN monto ELSE 0 END), 0) AS gastos
             FROM movimientos m
+            LEFT JOIN actividades a ON a.id = m.actividad_id
+            LEFT JOIN alumnos al ON al.id = m.alumno_id
             WHERE 1=1
         """
         reporte_params: list[Any] = []
-        reporte_sql, reporte_params = course_filter_sql(reporte_sql, reporte_params, 'm')
+        reporte_sql, reporte_params = movimientos_course_filter_sql(reporte_sql, reporte_params)
         reporte_sql += ' GROUP BY substr(fecha, 1, 7) ORDER BY mes ASC'
         reporte = db.fetchall(reporte_sql, reporte_params)
         mes = request.args.get('mes') or datetime.today().strftime('%Y-%m')
@@ -436,7 +447,7 @@ def create_app() -> Flask:
             WHERE 1=1
         """
         ultimos_params: list[Any] = []
-        ultimos_sql, ultimos_params = course_filter_sql(ultimos_sql, ultimos_params, 'm')
+        ultimos_sql, ultimos_params = movimientos_course_filter_sql(ultimos_sql, ultimos_params)
         ultimos_sql += ' ORDER BY m.fecha DESC, m.id DESC LIMIT 8'
         ultimos = db.fetchall(ultimos_sql, ultimos_params)
         backups = listar_backups()[:5]
@@ -447,10 +458,12 @@ def create_app() -> Flask:
                 COALESCE(SUM(CASE WHEN tipo='gasto' THEN monto ELSE 0 END),0) gastos_mes,
                 COUNT(*) movimientos_mes
             FROM movimientos m
+            LEFT JOIN actividades a ON a.id = m.actividad_id
+            LEFT JOIN alumnos al ON al.id = m.alumno_id
             WHERE substr(fecha, 1, 7) = ?
         """
         resumen_mes_params: list[Any] = [mes]
-        resumen_mes_sql, resumen_mes_params = course_filter_sql(resumen_mes_sql, resumen_mes_params, 'm')
+        resumen_mes_sql, resumen_mes_params = movimientos_course_filter_sql(resumen_mes_sql, resumen_mes_params)
         resumen_mes = db.fetchone(resumen_mes_sql, resumen_mes_params)
         alumnos_sql = 'SELECT COUNT(*) AS total FROM alumnos a WHERE activo = 1'
         alumnos_params: list[Any] = []
@@ -1348,7 +1361,7 @@ def obtener_movimientos_filtrados(db: DBAdapter, tipo: str = 'Todos', mes: str =
         sql += ' AND m.alumno_id = ?'
         params.append(int(alumno_id))
     if curso_scope:
-        sql += " AND lower(trim(COALESCE(m.curso, al.curso, ''))) = lower(trim(?))"
+        sql += " AND lower(trim(COALESCE(m.curso, a.curso, al.curso, ''))) = lower(trim(?))"
         params.append(curso_scope)
     if q:
         like = sql_like_ci(q)
@@ -1900,6 +1913,12 @@ def init_db(db: DBAdapter) -> None:
 
     try:
         db.execute("UPDATE movimientos SET curso = (SELECT curso FROM alumnos WHERE alumnos.id = movimientos.alumno_id) WHERE curso IS NULL AND alumno_id IS NOT NULL")
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    try:
+        db.execute("UPDATE movimientos SET curso = (SELECT curso FROM actividades WHERE actividades.id = movimientos.actividad_id) WHERE (curso IS NULL OR trim(curso) = '') AND actividad_id IS NOT NULL")
         db.commit()
     except Exception:
         db.rollback()
