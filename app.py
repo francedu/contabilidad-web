@@ -427,8 +427,8 @@ def create_app() -> Flask:
 
         reporte_sql = """
             SELECT substr(m.fecha, 1, 7) AS mes,
-                   COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN monto ELSE 0 END), 0) AS ingresos,
-                   COALESCE(SUM(CASE WHEN tipo = 'gasto' THEN monto ELSE 0 END), 0) AS gastos
+                   COALESCE(SUM(CASE WHEN m.tipo = 'ingreso' THEN m.monto ELSE 0 END), 0) AS ingresos,
+                   COALESCE(SUM(CASE WHEN m.tipo = 'gasto' THEN m.monto ELSE 0 END), 0) AS gastos
             FROM movimientos m
             LEFT JOIN actividades a ON a.id = m.actividad_id
             LEFT JOIN alumnos al ON al.id = m.alumno_id
@@ -444,6 +444,7 @@ def create_app() -> Flask:
             SELECT m.id, m.fecha, m.tipo, m.concepto, m.monto, COALESCE(a.nombre, '-') AS actividad
             FROM movimientos m
             LEFT JOIN actividades a ON a.id = m.actividad_id
+            LEFT JOIN alumnos al ON al.id = m.alumno_id
             WHERE 1=1
         """
         ultimos_params: list[Any] = []
@@ -454,8 +455,8 @@ def create_app() -> Flask:
 
         resumen_mes_sql = """
             SELECT
-                COALESCE(SUM(CASE WHEN tipo='ingreso' THEN monto ELSE 0 END),0) ingresos_mes,
-                COALESCE(SUM(CASE WHEN tipo='gasto' THEN monto ELSE 0 END),0) gastos_mes,
+                COALESCE(SUM(CASE WHEN m.tipo='ingreso' THEN m.monto ELSE 0 END),0) ingresos_mes,
+                COALESCE(SUM(CASE WHEN m.tipo='gasto' THEN m.monto ELSE 0 END),0) gastos_mes,
                 COUNT(*) movimientos_mes
             FROM movimientos m
             LEFT JOIN actividades a ON a.id = m.actividad_id
