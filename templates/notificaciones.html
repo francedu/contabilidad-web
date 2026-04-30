@@ -47,18 +47,18 @@
         <textarea class="form-control mb-3" rows="3" readonly>{{ item.mensaje }}</textarea>
         <div class="d-flex gap-2 flex-wrap">
           {% if current_user.can_edit() %}
-            {% if item.email %}
-            <form method="post" action="{{ url_for('notificaciones_enviar_correo', alumno_id=item.alumno_id) }}">
-              <input type="hidden" name="asunto" value="Notificación de deuda - {{ APP_NAME }}">
-              <input type="hidden" name="mensaje" value="{{ item.mensaje }}">
-              <button class="btn btn-sm btn-primary" type="submit">Enviar correo</button>
-            </form>
-            <a class="btn btn-sm btn-outline-secondary" href="mailto:{{ item.email }}?subject=Notificación%20de%20deuda%20-%20{{ APP_NAME }}&body={{ item.mensaje|urlencode }}">Abrir en correo</a>
-            {% else %}
-            <span class="badge text-bg-warning">Sin correo en ficha</span>
-            {% endif %}
+          {% if item.email %}
+          <form method="post" action="{{ url_for('notificaciones_enviar_correo', alumno_id=item.alumno_id) }}">
+            <input type="hidden" name="asunto" value="Notificación de deuda - {{ APP_NAME }}">
+            <input type="hidden" name="mensaje" value="{{ item.mensaje }}">
+            <button class="btn btn-sm btn-primary" type="submit">Enviar correo</button>
+          </form>
+          <a class="btn btn-sm btn-outline-secondary" href="mailto:{{ item.email }}?subject=Notificación%20de%20deuda%20-%20{{ APP_NAME }}&body={{ item.mensaje|urlencode }}">Abrir en correo</a>
           {% else %}
-            <span class="badge text-bg-secondary">Solo lectura</span>
+          <span class="badge text-bg-warning">Sin correo en ficha</span>
+          {% endif %}
+          {% else %}
+          <span class="badge text-bg-secondary">Solo lectura</span>
           {% endif %}
         </div>
       </div>

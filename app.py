@@ -2228,6 +2228,7 @@ def create_app() -> Flask:
             return False, f'No se pudo enviar el correo: {exc}'
 
     @app.post('/notificaciones/enviar-correo/<int:alumno_id>')
+    @login_required
     @role_required('admin', 'presidente', 'tesorero', 'secretario')
     def notificaciones_enviar_correo(alumno_id: int):
         db = get_db()
@@ -3211,6 +3212,28 @@ def init_db(db: DBAdapter) -> None:
             db.rollback()
 
     if db.kind == 'sqlite':
+        # SQLite no permite modificar un CHECK existente con ALTER TABLE.
+        # Se reconstruye usuario_roles_curso para permitir el rol 'apoderado'.
+        try:
+            db.executescript("""
+            DROP TABLE IF EXISTS usuario_roles_curso_legacy;
+            ALTER TABLE usuario_roles_curso RENAME TO usuario_roles_curso_legacy;
+            CREATE TABLE usuario_roles_curso (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                usuario_id INTEGER NOT NULL,
+                colegio_id INTEGER NOT NULL,
+                curso TEXT NOT NULL,
+                rol_curso TEXT NOT NULL CHECK(rol_curso IN ('presidente', 'tesorero', 'secretario', 'apoderado')),
+                UNIQUE(usuario_id, colegio_id, curso, rol_curso)
+            );
+            INSERT OR IGNORE INTO usuario_roles_curso (id, usuario_id, colegio_id, curso, rol_curso)
+            SELECT id, usuario_id, colegio_id, curso, rol_curso FROM usuario_roles_curso_legacy;
+            DROP TABLE usuario_roles_curso_legacy;
+            """)
+            db.commit()
+        except Exception:
+            db.rollback()
+
         try:
             db.executescript("""
             DROP TABLE IF EXISTS usuarios_legacy;
@@ -3242,28 +3265,6 @@ def init_db(db: DBAdapter) -> None:
         try:
             db.execute('ALTER TABLE usuario_roles_curso DROP CONSTRAINT IF EXISTS usuario_roles_curso_rol_curso_check')
             db.execute("ALTER TABLE usuario_roles_curso ADD CONSTRAINT usuario_roles_curso_rol_curso_check CHECK (rol_curso IN ('presidente', 'tesorero', 'secretario', 'apoderado'))")
-            db.commit()
-        except Exception:
-            db.rollback()
-    else:
-        # SQLite no permite modificar un CHECK existente con ALTER TABLE.
-        # Se reconstruye la tabla para permitir el nuevo rol de curso 'apoderado'.
-        try:
-            db.executescript("""
-            DROP TABLE IF EXISTS usuario_roles_curso_legacy;
-            ALTER TABLE usuario_roles_curso RENAME TO usuario_roles_curso_legacy;
-            CREATE TABLE usuario_roles_curso (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                usuario_id INTEGER NOT NULL,
-                colegio_id INTEGER NOT NULL,
-                curso TEXT NOT NULL,
-                rol_curso TEXT NOT NULL CHECK(rol_curso IN ('presidente', 'tesorero', 'secretario', 'apoderado')),
-                UNIQUE(usuario_id, colegio_id, curso, rol_curso)
-            );
-            INSERT OR IGNORE INTO usuario_roles_curso (id, usuario_id, colegio_id, curso, rol_curso)
-            SELECT id, usuario_id, colegio_id, curso, rol_curso FROM usuario_roles_curso_legacy;
-            DROP TABLE usuario_roles_curso_legacy;
-            """)
             db.commit()
         except Exception:
             db.rollback()
