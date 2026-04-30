@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Notificaciones · {{ APP_NAME }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h1 class="h3 mb-1">Notificaciones de deuda</h1>
+    <p class="text-muted mb-0">Mensajes listos para copiar y enviar por WhatsApp o correo.</p>
+  </div>
+</div>
+
+<form class="card shadow-sm mb-4">
+  <div class="card-body row g-3 align-items-end">
+    {% if is_admin_global %}
+    <div class="col-md-3">
+      <label class="form-label">Colegio</label>
+      <select name="colegio_id" class="form-select">
+        <option value="">Todos</option>
+        {% for c in colegios %}<option value="{{ c.id }}" {% if selected_colegio_id == c.id %}selected{% endif %}>{{ c.nombre }}</option>{% endfor %}
+      </select>
+    </div>
+    {% endif %}
+    <div class="col-md-3">
+      <label class="form-label">Curso</label>
+      <select name="curso" class="form-select">
+        <option value="">Todos</option>
+        {% for curso_op in predefined_courses %}<option value="{{ curso_op }}" {% if selected_admin_course == curso_op or current_scope_course == curso_op %}selected{% endif %}>{{ curso_op }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Mes corte</label>
+      <input type="month" name="mes" class="form-control" value="{{ mes }}">
+    </div>
+    <div class="col-md-2"><button class="btn btn-primary w-100">Filtrar</button></div>
+  </div>
+</form>
+
+<div class="row g-3">
+{% for item in mensajes %}
+  <div class="col-12">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <div class="d-flex justify-content-between flex-wrap gap-2 mb-2">
+          <strong>{{ item.alumno }}</strong>
+          <span class="badge text-bg-danger">Debe {{ formato_monto(item.deuda) }}</span>
+        </div>
+        <div class="text-muted small mb-2">Curso: {{ item.curso }}{% if item.telefono %} · Teléfono: {{ item.telefono }}{% endif %}{% if item.email %} · Correo: {{ item.email }}{% endif %}</div>
+        <textarea class="form-control mb-3" rows="3" readonly>{{ item.mensaje }}</textarea>
+        <div class="d-flex gap-2 flex-wrap">
+          {% if item.email %}
+          <form method="post" action="{{ url_for('notificaciones_enviar_correo', alumno_id=item.alumno_id) }}">
+            <input type="hidden" name="asunto" value="Notificación de deuda - {{ APP_NAME }}">
+            <input type="hidden" name="mensaje" value="{{ item.mensaje }}">
+            <button class="btn btn-sm btn-primary" type="submit">Enviar correo</button>
+          </form>
+          <a class="btn btn-sm btn-outline-secondary" href="mailto:{{ item.email }}?subject=Notificación%20de%20deuda%20-%20{{ APP_NAME }}&body={{ item.mensaje|urlencode }}">Abrir en correo</a>
+          {% else %}
+          <span class="badge text-bg-warning">Sin correo en ficha</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+{% else %}
+  <div class="col-12"><div class="alert alert-success">No hay deudores para el filtro seleccionado.</div></div>
+{% endfor %}
+</div>
+{% endblock %}

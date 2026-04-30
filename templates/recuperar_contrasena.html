@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block title %}Recuperar contraseña{% endblock %}
+{% block content %}
+<div class="login-wrap">
+  <div class="card shadow login-card border-0">
+    <div class="card-body p-4 p-md-5">
+      <div class="page-eyebrow">Recuperación de acceso</div>
+      <h1 class="h3 mb-3">Recuperar contraseña</h1>
+      <p class="text-muted">Ingresa usuario o correo. El sistema generará un token local válido por 2 horas.</p>
+      <form method="post" class="row g-3">
+        <div class="col-12"><label class="form-label">Usuario o correo</label><input class="form-control form-control-lg" name="identificador" required autofocus></div>
+        <div class="col-12 d-grid"><button class="btn btn-primary btn-lg">Generar token</button></div>
+      </form>
+      {% if token %}
+      <div class="alert alert-success mt-4">
+        <div class="fw-semibold">Token generado</div>
+        <code class="d-block my-2 user-select-all">{{ token }}</code>
+        <a class="btn btn-sm btn-success" href="{{ url_for('restablecer_contrasena', token=token) }}">Restablecer contraseña</a>
+      </div>
+      {% endif %}
+      <a class="small" href="{{ url_for('login') }}">Volver al login</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

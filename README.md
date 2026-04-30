@@ -14,7 +14,7 @@ python3 app.py
 ## Acceso inicial
 
 - usuario: `admin`
-- contraseña: `admin123`
+- contraseña inicial: definida por el administrador o por la variable `ADMIN_PASSWORD`
 
 ## Motores soportados
 

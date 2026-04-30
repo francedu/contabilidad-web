@@ -197,3 +197,124 @@ body { background: linear-gradient(180deg, #f7f9fc 0%, #eef3fb 100%); color: var
   .login-card .card-body, .form-card .card-body { padding: 1.1rem !important; }
   .nav-user-meta { justify-content: start; }
 }
+
+/* Login ContaCurso */
+.login-page {
+  position: relative;
+  min-height: calc(100vh - 2rem);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 2rem 1rem;
+}
+.login-background {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(56, 189, 248, .22), transparent 28%),
+    radial-gradient(circle at 80% 10%, rgba(37, 99, 235, .18), transparent 26%),
+    linear-gradient(135deg, #eef6ff 0%, #f8fafc 45%, #eff6ff 100%);
+  z-index: 0;
+}
+.login-blob {
+  position: absolute;
+  width: 18rem;
+  height: 18rem;
+  border-radius: 999px;
+  filter: blur(16px);
+  opacity: .55;
+}
+.login-blob-one { left: -6rem; bottom: 3rem; background: rgba(22, 163, 74, .18); }
+.login-blob-two { right: -5rem; bottom: -4rem; background: rgba(30, 58, 138, .18); }
+.login-shell {
+  position: relative;
+  z-index: 1;
+  width: min(1040px, 100%);
+  display: grid;
+  grid-template-columns: 1.05fr .95fr;
+  gap: 1.25rem;
+  align-items: stretch;
+}
+.login-brand-panel {
+  color: #fff;
+  background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 55%, #0f172a 100%);
+  border-radius: 1.6rem;
+  padding: clamp(1.5rem, 4vw, 3rem);
+  box-shadow: 0 25px 70px rgba(15, 23, 42, .2);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 520px;
+}
+.brand-mark {
+  width: 4rem;
+  height: 4rem;
+  display: grid;
+  place-items: center;
+  border-radius: 1.2rem;
+  background: rgba(255,255,255,.16);
+  border: 1px solid rgba(255,255,255,.22);
+  font-weight: 900;
+  letter-spacing: -.05em;
+  font-size: 1.35rem;
+  margin-bottom: 1.5rem;
+}
+.login-title {
+  font-size: clamp(2.3rem, 5vw, 4.2rem);
+  line-height: .95;
+  font-weight: 900;
+  letter-spacing: -.06em;
+  margin-bottom: 1rem;
+}
+.login-subtitle {
+  color: rgba(255,255,255,.82);
+  font-size: 1.05rem;
+  max-width: 31rem;
+}
+.login-feature-list {
+  display: grid;
+  gap: .75rem;
+  margin-top: 2rem;
+  color: rgba(255,255,255,.88);
+}
+.login-feature-list div {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+}
+.login-feature-list span {
+  width: 1.55rem;
+  height: 1.55rem;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  background: rgba(34, 197, 94, .22);
+  border: 1px solid rgba(255,255,255,.2);
+  color: #dcfce7;
+  font-weight: 800;
+}
+.login-page .login-card {
+  border-radius: 1.6rem;
+  align-self: center;
+  box-shadow: 0 25px 70px rgba(15, 23, 42, .14);
+}
+.login-submit {
+  border-radius: 1rem;
+  font-weight: 800;
+  box-shadow: 0 12px 24px rgba(37,99,235,.18);
+}
+.login-page .login-help {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  padding: .85rem 1rem;
+}
+@media (max-width: 900px) {
+  .login-shell { grid-template-columns: 1fr; max-width: 560px; }
+  .login-brand-panel { min-height: auto; }
+}
+@media (max-width: 576px) {
+  .login-page { padding: 1rem; }
+  .login-brand-panel { border-radius: 1.2rem; }
+  .login-page .login-card { border-radius: 1.2rem; }
+}

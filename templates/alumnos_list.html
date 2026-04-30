@@ -50,17 +50,18 @@
       <table class="table table-hover mb-0 align-middle">
         <thead>
           <tr>
-            <th>Nombre</th><th>Curso</th><th class="text-end">Cuota</th><th class="text-end">Pagado {{ mes }}</th><th class="text-end">Debe {{ mes }}</th><th>Estado</th><th></th>
+            <th>Nombre</th><th>Colegio</th><th>Curso</th><th class="text-end">Cuota</th><th class="text-end">Pagado {{ mes }}</th><th class="text-end">Debe {{ mes }}</th><th>Estado</th><th></th>
           </tr>
         </thead>
         <tbody>
         {% for alumno in alumnos %}
         {% set deuda = [alumno['cuota_mensual'] - alumno['pagado_mes'], 0]|max %}
-        <tr data-filter-row data-filter-text="{{ alumno['nombre'] }} {{ alumno['curso'] or '' }} {{ 'activo' if alumno['activo'] else 'inactivo' }} {{ deuda }}">
+        <tr data-filter-row data-filter-text="{{ alumno['nombre'] }} {{ alumno['colegio_nombre'] or '' }} {{ alumno['curso'] or '' }} {{ 'activo' if alumno['activo'] else 'inactivo' }} {{ deuda }}">
           <td>
             <a class="fw-semibold text-decoration-none" href="{{ url_for('alumno_detail', alumno_id=alumno['id'], mes=mes) }}">{{ alumno['nombre'] }}</a>
             <div class="small text-muted">ID #{{ alumno['id'] }}</div>
           </td>
+          <td>{{ alumno['colegio_nombre'] or '-' }}</td>
           <td>{{ alumno['curso'] or '-' }}</td>
           <td class="text-end">{{ formato_monto(alumno['cuota_mensual']) }}</td>
           <td class="text-end">{{ formato_monto(alumno['pagado_mes']) }}</td>
@@ -80,9 +81,9 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="7" class="text-center text-muted py-4">Sin alumnos.</td></tr>
+        <tr><td colspan="8" class="text-center text-muted py-4">Sin alumnos.</td></tr>
         {% endfor %}
-        <tr class="d-none"><td colspan="7" class="text-center text-muted py-4" data-empty-search>No hay resultados para ese filtro rápido.</td></tr>
+        <tr class="d-none"><td colspan="8" class="text-center text-muted py-4" data-empty-search>No hay resultados para ese filtro rápido.</td></tr>
         </tbody>
       </table>
     </div>

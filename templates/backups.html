@@ -7,6 +7,7 @@
     <button class="btn btn-primary">Crear respaldo ahora</button>
   </form>
 </div>
+<div class="alert alert-info shadow-sm">Restaurar reemplaza la base actual, pero antes crea automáticamente un respaldo de seguridad.</div>
 <div class="card shadow-sm">
   <div class="card-body p-0">
     <div class="table-responsive">
@@ -18,7 +19,19 @@
             <td>{{ b['nombre'] }}</td>
             <td>{{ b['modificado'].strftime('%Y-%m-%d %H:%M:%S') }}</td>
             <td class="text-end">{{ '%.1f KB'|format(b['tamano']/1024) }}</td>
-            <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{{ url_for('backups_download', nombre=b['nombre']) }}">Descargar</a></td>
+            <td class="text-end">
+              <div class="btn-group btn-group-sm">
+                <a class="btn btn-outline-primary" href="{{ url_for('backups_download', nombre=b['nombre']) }}">Descargar</a>
+                {% if b['nombre'].endswith('.db') %}
+                <form method="post" action="{{ url_for('backups_restore', nombre=b['nombre']) }}" onsubmit="return confirm('Esto reemplazará la base actual. Antes se creará un respaldo automático. ¿Continuar?')">
+                  <button class="btn btn-outline-warning rounded-0" type="submit">Restaurar</button>
+                </form>
+                {% endif %}
+                <form method="post" action="{{ url_for('backups_delete', nombre=b['nombre']) }}" onsubmit="return confirm('¿Eliminar este respaldo?')">
+                  <button class="btn btn-outline-danger" type="submit">Eliminar</button>
+                </form>
+              </div>
+            </td>
           </tr>
           {% else %}
           <tr><td colspan="4" class="text-center text-muted py-4">Aún no hay respaldos.</td></tr>

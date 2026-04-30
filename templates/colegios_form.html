@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+{% block title %}Colegio{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">{{ 'Editar colegio' if colegio else 'Nuevo colegio' }}</h1>
+<div class="card shadow-sm"><div class="card-body"><form method="post" class="row g-3">
+  <div class="col-md-6"><label class="form-label">Nombre</label><input class="form-control" name="nombre" value="{{ colegio['nombre'] if colegio else '' }}" required></div>
+  <div class="col-md-6"><label class="form-label">Ubicación</label><input class="form-control" name="ubicacion" value="{{ colegio['ubicacion'] if colegio else '' }}"></div>
+  <div class="col-md-4"><label class="form-label">Plan</label><select class="form-select" name="plan">
+    {% set plan_actual = colegio['plan'] if colegio and 'plan' in colegio.keys() else 'basico' %}
+    <option value="basico" {% if plan_actual == 'basico' %}selected{% endif %}>Básico</option>
+    <option value="pro" {% if plan_actual == 'pro' %}selected{% endif %}>Pro</option>
+  </select></div>
+  <div class="col-md-4"><label class="form-label">Estado suscripción</label><select class="form-select" name="estado_suscripcion">
+    {% set estado_actual = colegio['estado_suscripcion'] if colegio and 'estado_suscripcion' in colegio.keys() else 'activo' %}
+    <option value="activo" {% if estado_actual == 'activo' %}selected{% endif %}>Activo</option>
+    <option value="vencido" {% if estado_actual == 'vencido' %}selected{% endif %}>Vencido / solo lectura</option>
+  </select></div>
+  <div class="col-md-4"><label class="form-label">Fecha vencimiento</label><input class="form-control" type="date" name="fecha_vencimiento" value="{{ colegio['fecha_vencimiento'][:10] if colegio and 'fecha_vencimiento' in colegio.keys() and colegio['fecha_vencimiento'] else '' }}"></div>
+  <div class="col-12 form-check ms-2"><input class="form-check-input" type="checkbox" name="activo" {% if not colegio or colegio['activo'] %}checked{% endif %}><label class="form-check-label">Colegio activo</label></div>
+  <div class="col-12 d-flex gap-2"><button class="btn btn-primary">Guardar</button><a class="btn btn-outline-secondary" href="{{ url_for('colegios_list') }}">Cancelar</a></div>
+</form></div></div>
+{% endblock %}

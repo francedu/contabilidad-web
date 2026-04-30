@@ -11,7 +11,7 @@
     <label for="mes" class="form-label small text-muted mb-1">Mes analizado</label>
     <div class="row g-2 align-items-end">
       <div class="col-md-7"><input id="mes" name="mes" type="month" value="{{ mes }}" class="form-control"></div>
-      {% if current_user.role == "admin" %}<div class="col-md-5"><select class="form-select" name="curso"><option value="">Todos los cursos</option>{% for curso in available_courses %}<option value="{{ curso }}" {% if selected_admin_course == curso %}selected{% endif %}>{{ curso }}</option>{% endfor %}</select></div>{% endif %}
+      {% if current_user.is_admin_global() %}<div class="col-md-6"><select class="form-select" name="colegio_id"><option value="">Todos los colegios</option>{% for colegio in colegios %}<option value="{{ colegio['id'] }}" {% if selected_colegio_id and selected_colegio_id|int == colegio['id']|int %}selected{% endif %}>{{ colegio['nombre'] }}</option>{% endfor %}</select></div><div class="col-md-6"><select class="form-select" name="curso"><option value="">Todos los cursos</option>{% for curso in available_courses %}<option value="{{ curso }}" {% if selected_admin_course == curso %}selected{% endif %}>{{ curso }}</option>{% endfor %}</select></div>{% endif %}
       <div class="col-12 d-grid"><button class="btn btn-primary">Actualizar</button></div>
     </div>
   </form>
@@ -47,6 +47,49 @@
     </div>
   </div>
 </div>
+
+{% if current_user.is_admin_global() and resumen_colegios %}
+<div class="card shadow-sm dashboard-card mb-4">
+  <div class="card-body">
+    <div class="section-head mb-3">
+      <div>
+        <h2 class="h5 mb-1">Resumen por colegio</h2>
+        <p class="text-muted small mb-0">Vista consolidada para comparar saldos, ingresos, gastos y alumnos activos por colegio.</p>
+      </div>
+      <a href="{{ url_for('colegios_list') }}" class="btn btn-sm btn-outline-secondary">Administrar colegios</a>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Colegio</th>
+            <th class="text-end">Alumnos</th>
+            <th class="text-end">Ingresos</th>
+            <th class="text-end">Gastos</th>
+            <th class="text-end">Saldo</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for colegio in resumen_colegios %}
+          {% set saldo = (colegio['ingresos'] or 0) - (colegio['gastos'] or 0) %}
+          <tr>
+            <td class="fw-semibold">{{ colegio['nombre'] }}</td>
+            <td class="text-end">{{ colegio['alumnos'] }}</td>
+            <td class="text-end text-success">{{ formato_monto(colegio['ingresos']) }}</td>
+            <td class="text-end text-danger">{{ formato_monto(colegio['gastos']) }}</td>
+            <td class="text-end fw-semibold">{{ formato_monto(saldo) }}</td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-primary" href="{{ url_for('dashboard', colegio_id=colegio['id'], curso=selected_admin_course or '') }}">Ver</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 <div class="row g-4 mb-4">
   <div class="col-lg-8">

@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+{% block title %}Auditoría{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="h3 mb-1">Auditoría de acciones</h1>
+    <p class="text-muted mb-0">Historial de operaciones importantes realizadas en ContaCurso.</p>
+  </div>
+</div>
+<form class="card card-body shadow-sm mb-3" method="get">
+  <div class="row g-2 align-items-end">
+    <div class="col-md-4">
+      <label class="form-label">Entidad</label>
+      <select class="form-select" name="entidad">
+        <option value="">Todas</option>
+        {% for e in entidades %}<option value="{{ e['entidad'] }}" {% if entidad == e['entidad'] %}selected{% endif %}>{{ e['entidad'] }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Usuario</label>
+      <input class="form-control" name="usuario" value="{{ usuario }}" placeholder="admin, tesorero...">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Límite</label>
+      <input class="form-control" type="number" name="limit" value="{{ limit }}" min="50" max="1000">
+    </div>
+    <div class="col-md-2 d-grid"><button class="btn btn-primary">Filtrar</button></div>
+  </div>
+</form>
+<div class="card shadow-sm">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0 align-middle">
+        <thead><tr><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Entidad</th><th>ID</th><th>Colegio</th><th>Curso</th><th>Detalle</th><th>IP</th></tr></thead>
+        <tbody>
+        {% for a in acciones %}
+          <tr>
+            <td class="text-nowrap">{{ a['fecha'] }}</td>
+            <td>{{ a['username'] or '-' }}</td>
+            <td><span class="badge text-bg-secondary">{{ a['accion'] }}</span></td>
+            <td>{{ a['entidad'] }}</td>
+            <td>{{ a['entidad_id'] or '-' }}</td>
+            <td>{{ a['colegio_id'] or '-' }}</td>
+            <td>{{ a['curso'] or '-' }}</td>
+            <td>{{ a['detalle'] or '-' }}</td>
+            <td>{{ a['ip'] or '-' }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="9" class="text-center text-muted py-4">Aún no hay acciones registradas.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

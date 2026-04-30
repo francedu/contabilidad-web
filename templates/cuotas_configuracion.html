@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Cuotas mensuales · {{ APP_NAME }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h1 class="h3 mb-1">Cuotas mensuales</h1>
+    <p class="text-muted mb-0">Define el monto esperado por colegio, curso y mes.</p>
+  </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+  <div class="card-body">
+    <form method="post" class="row g-3 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label">Colegio</label>
+        <select class="form-select" name="colegio_id" required>
+          <option value="">Seleccionar</option>
+          {% for c in colegios %}
+            <option value="{{ c.id }}" {% if colegio_id and c.id == colegio_id %}selected{% endif %}>{{ c.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Curso</label>
+        <select class="form-select" name="curso" required>
+          <option value="">Seleccionar</option>
+          {% for curso_op in predefined_courses %}
+            <option value="{{ curso_op }}" {% if curso == curso_op %}selected{% endif %}>{{ curso_op }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">Mes</label>
+        <input type="month" name="mes" value="{{ mes }}" class="form-control" required>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">Monto</label>
+        <input type="number" min="0" step="1" name="monto" class="form-control" required>
+      </div>
+      <div class="col-md-2">
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" value="1" name="aplicar_alumnos" id="aplicar_alumnos">
+          <label class="form-check-label" for="aplicar_alumnos">Aplicar a alumnos activos</label>
+        </div>
+        <button class="btn btn-primary w-100" type="submit">Guardar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card shadow-sm">
+  <div class="card-body">
+    <h2 class="h5">Configuraciones registradas</h2>
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead><tr><th>Colegio</th><th>Curso</th><th>Mes</th><th class="text-end">Monto</th><th>Actualizado por</th><th>Fecha</th></tr></thead>
+        <tbody>
+        {% for item in cuotas_cfg %}
+          <tr>
+            <td>{{ item.colegio_nombre or '-' }}</td>
+            <td>{{ item.curso }}</td>
+            <td>{{ item.mes }}</td>
+            <td class="text-end fw-semibold">{{ formato_monto(item.monto) }}</td>
+            <td>{{ item.creado_por or '-' }}</td>
+            <td>{{ item.creado_en or '-' }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="text-center text-muted py-4">No hay cuotas configuradas para este filtro.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

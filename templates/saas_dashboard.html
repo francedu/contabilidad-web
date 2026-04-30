@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% block title %}Panel plataforma{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div><div class="text-uppercase text-muted small fw-bold">Super administración</div><h1 class="h3 mb-0">Panel de plataforma</h1></div>
+  <a class="btn btn-outline-primary" href="{{ url_for('colegios_list') }}">Gestionar colegios</a>
+</div>
+<div class="row g-3 mb-4">
+  <div class="col-md-2"><div class="card shadow-sm"><div class="card-body"><div class="text-muted small">Colegios</div><div class="h3">{{ totales.colegios }}</div></div></div></div>
+  <div class="col-md-2"><div class="card shadow-sm"><div class="card-body"><div class="text-muted small">Activos</div><div class="h3 text-success">{{ totales.activos }}</div></div></div></div>
+  <div class="col-md-2"><div class="card shadow-sm"><div class="card-body"><div class="text-muted small">Vencidos</div><div class="h3 text-danger">{{ totales.vencidos }}</div></div></div></div>
+  <div class="col-md-2"><div class="card shadow-sm"><div class="card-body"><div class="text-muted small">Alumnos</div><div class="h3">{{ totales.alumnos }}</div></div></div></div>
+  <div class="col-md-2"><div class="card shadow-sm"><div class="card-body"><div class="text-muted small">Usuarios</div><div class="h3">{{ totales.usuarios }}</div></div></div></div>
+  <div class="col-md-2"><div class="card shadow-sm"><div class="card-body"><div class="text-muted small">Pagos</div><div class="h3">{{ totales.pagos }}</div></div></div></div>
+</div>
+<div class="card shadow-sm"><div class="card-body p-0"><div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>Colegio</th><th>Plan</th><th>Estado</th><th>Vence</th><th>Alumnos</th><th>Usuarios</th><th>Pagos</th><th>Total pagos</th></tr></thead><tbody>
+{% for r in resumen %}
+<tr><td>{{ r['nombre'] }}</td><td><span class="badge text-bg-info">{{ (r['plan'] or 'basico')|title }}</span></td><td><span class="badge {{ 'text-bg-success' if (r['estado_suscripcion'] or 'activo') == 'activo' else 'text-bg-danger' }}">{{ (r['estado_suscripcion'] or 'activo')|title }}</span></td><td>{{ r['fecha_vencimiento'] or '-' }}</td><td>{{ r['alumnos'] }}</td><td>{{ r['usuarios'] }}</td><td>{{ r['pagos'] }}</td><td>{{ formato_monto(r['monto_pagos'] or 0) }}</td></tr>
+{% endfor %}
+</tbody></table></div></div></div>
+{% endblock %}

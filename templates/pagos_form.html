@@ -2,20 +2,50 @@
 {% block title %}Registrar pago{% endblock %}
 {% block content %}
 {% set selected_alumno = (pago['alumno_id'] if pago else request.args.get('alumno_id', ''))|string %}
+{% set selected_pago_colegio_id = selected_pago_colegio_id if selected_pago_colegio_id is defined else (pago['colegio_id'] if pago and 'colegio_id' in pago.keys() else selected_colegio_id) %}
 <div class="form-shell mx-auto">
   <div class="page-head mb-3">
     <div class="page-eyebrow">Cobros</div>
     <h1 class="h3 mb-1">{{ 'Editar pago' if pago else 'Registrar pago o aporte' }}</h1>
     <div class="text-muted">Registra cuotas mensuales o aportes vinculados a una actividad.</div>
   </div>
-  <div class="card shadow-sm form-card"><div class="card-body p-4"><form method="post" class="row g-3">
-    <div class="col-md-6"><label class="form-label">Alumno</label><select class="form-select" name="alumno_id" required><option value="">Selecciona</option>{% for alumno in alumnos %}<option value="{{ alumno['id'] }}" {% if selected_alumno==alumno['id']|string %}selected{% endif %}>{{ alumno['nombre'] }}{% if alumno['curso'] %} ({{ alumno['curso'] }}){% endif %}</option>{% endfor %}</select></div>
+  <div class="card shadow-sm form-card"><div class="card-body p-4">
+    {% if current_user.is_admin_global() and not pago %}
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label">Filtrar alumnos por colegio</label>
+          <select class="form-select" id="filtroColegioPago">
+            <option value="">Todos los colegios</option>
+            {% for colegio in colegios %}
+              <option value="{{ colegio['id'] }}" {% if selected_pago_colegio_id and selected_pago_colegio_id|int == colegio['id']|int %}selected{% endif %}>{{ colegio['nombre'] }}</option>
+            {% endfor %}
+          </select>
+          <div class="form-text">Selecciona un colegio para ver solo sus alumnos. Si lo dejas en todos, el nombre del colegio aparecerá junto al alumno.</div>
+        </div>
+      </div>
+    {% endif %}
+    <form method="post" class="row g-3">
+    {% if current_user.is_admin_global() and not pago %}
+      <input type="hidden" name="colegio_id" value="{{ selected_pago_colegio_id or '' }}">
+    {% endif %}
+    <div class="col-md-6">
+      <label class="form-label">Alumno</label>
+      <select class="form-select" name="alumno_id" required>
+        <option value="">Selecciona</option>
+        {% for alumno in alumnos %}
+          <option value="{{ alumno['id'] }}" {% if selected_alumno==alumno['id']|string %}selected{% endif %}>
+            {{ alumno['nombre'] }}{% if alumno['curso'] %} ({{ alumno['curso'] }}){% endif %}{% if current_user.is_admin_global() and alumno['colegio_nombre'] %} — {{ alumno['colegio_nombre'] }}{% endif %}
+          </option>
+        {% endfor %}
+      </select>
+      {% if not alumnos %}<div class="form-text text-danger">No hay alumnos disponibles para el colegio/curso seleccionado.</div>{% endif %}
+    </div>
     <div class="col-md-3"><label class="form-label">Fecha</label><input class="form-control" type="date" name="fecha" value="{{ pago['fecha'] if pago else now.strftime('%Y-%m-%d') }}" required></div>
     <div class="col-md-3"><label class="form-label">Mes</label><input class="form-control" type="month" name="mes" value="{{ pago['mes'] if pago else now.strftime('%Y-%m') }}" required></div>
     {% if not pago %}
     <div class="col-md-4"><label class="form-label">Tipo</label><select class="form-select" name="tipo_pago" id="tipoPago"><option value="cuota_mensual">Abono a cuota mensual</option><option value="actividad_alumno">Aporte a actividad</option></select></div>
     <div class="col-md-4"><label class="form-label">Monto</label><div class="input-group"><span class="input-group-text">$</span><input class="form-control" name="monto" data-money-input inputmode="decimal" required placeholder="0"></div></div>
-    <div class="col-md-4" id="actividadWrap"><label class="form-label">Actividad</label><select class="form-select" name="actividad_id"><option value="">Sin actividad</option>{% for a in actividades %}<option value="{{ a['id'] }}">{{ a['nombre'] }} ({{ a['fecha'] }})</option>{% endfor %}</select><div class="form-text">Solo se usa para aportes a actividades.</div></div>
+    <div class="col-md-4" id="actividadWrap"><label class="form-label">Actividad</label><select class="form-select" name="actividad_id"><option value="">Sin actividad</option>{% for a in actividades %}<option value="{{ a['id'] }}">{{ a['nombre'] }}{% if a['curso'] %} ({{ a['curso'] }}){% endif %}{% if current_user.is_admin_global() and a['colegio_nombre'] %} — {{ a['colegio_nombre'] }}{% endif %}</option>{% endfor %}</select><div class="form-text">Solo se usa para aportes a actividades.</div></div>
     {% else %}
     <div class="col-md-6"><label class="form-label">Monto</label><div class="input-group"><span class="input-group-text">$</span><input class="form-control" name="monto" data-money-input inputmode="decimal" value="{{ pago['monto'] }}" required></div></div>
     <div class="col-md-6"><label class="form-label">Tipo</label><input class="form-control" value="Cuota mensual" disabled></div>
@@ -25,4 +55,19 @@
   </form></div></div>
 </div>
 {% endblock %}
-{% block scripts %}{% if not pago %}<script>function toggleActividad(){const isAporte=document.getElementById('tipoPago').value==='actividad_alumno';document.getElementById('actividadWrap').style.display=isAporte?'block':'none';}document.getElementById('tipoPago').addEventListener('change',toggleActividad);toggleActividad();</script>{% endif %}{% endblock %}
+{% block scripts %}
+{% if current_user.is_admin_global() and not pago %}
+<script>
+const filtroColegioPago = document.getElementById('filtroColegioPago');
+if (filtroColegioPago) {
+  filtroColegioPago.addEventListener('change', function () {
+    const url = new URL(window.location.href);
+    if (this.value) { url.searchParams.set('colegio_id', this.value); }
+    else { url.searchParams.delete('colegio_id'); }
+    window.location.href = url.toString();
+  });
+}
+</script>
+{% endif %}
+{% if not pago %}<script>function toggleActividad(){const isAporte=document.getElementById('tipoPago').value==='actividad_alumno';document.getElementById('actividadWrap').style.display=isAporte?'block':'none';}document.getElementById('tipoPago').addEventListener('change',toggleActividad);toggleActividad();</script>{% endif %}
+{% endblock %}

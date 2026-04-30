@@ -17,6 +17,18 @@
           <label class="form-label">Nombre</label>
           <input class="form-control" name="nombre" value="{{ alumno['nombre'] if alumno else '' }}" required placeholder="Nombre completo del alumno">
         </div>
+        {% if current_user.is_admin_global() %}
+        <div class="col-md-3">
+          <label class="form-label">Colegio</label>
+          {% set selected_alumno_colegio = (alumno['colegio_id'] if alumno else selected_colegio_id or '') %}
+          <select class="form-select" name="colegio_id" required>
+            <option value="">Seleccionar colegio</option>
+            {% for colegio in colegios %}
+              <option value="{{ colegio['id'] }}" {% if selected_alumno_colegio and selected_alumno_colegio|int == colegio['id']|int %}selected{% endif %}>{{ colegio['nombre'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% endif %}
         <div class="col-md-3">
           <label class="form-label">Curso</label>
           {% set selected_course = (alumno['curso'] if alumno else current_scope_course or '') %}
@@ -49,6 +61,10 @@
         <div class="col-md-3">
           <label class="form-label">Teléfono</label>
           <input class="form-control" name="telefono" value="{{ alumno['telefono'] if alumno else '' }}" placeholder="Ej. +56 9...">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Correo apoderado</label>
+          <input class="form-control" type="email" name="email" value="{{ alumno['email'] if alumno and 'email' in alumno.keys() else '' }}" placeholder="correo@ejemplo.cl">
         </div>
         <div class="col-md-3">
           <label class="form-label">Dirección</label>

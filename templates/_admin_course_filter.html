@@ -1,4 +1,13 @@
-{% if current_user.role == "admin" %}
+{% if current_user.is_admin_global() %}
+<div class="col-lg-3 col-md-3">
+  <label class="form-label">Colegio</label>
+  <select class="form-select" name="colegio_id">
+    <option value="">Todos los colegios</option>
+    {% for colegio in colegios %}
+      <option value="{{ colegio['id'] }}" {% if selected_colegio_id and selected_colegio_id|int == colegio['id']|int %}selected{% endif %}>{{ colegio['nombre'] }}</option>
+    {% endfor %}
+  </select>
+</div>
 <div class="col-lg-3 col-md-3">
   <label class="form-label">Curso</label>
   <select class="form-select" name="curso">

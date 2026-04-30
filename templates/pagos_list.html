@@ -25,18 +25,19 @@
   <div class="col-lg-2 d-grid"><a class="btn btn-outline-light border" href="{{ url_for('pagos_list') }}">Limpiar</a></div>
 </form></div></div>
 
-<div class="card shadow-sm"><div class="card-body p-0"><div class="table-responsive" id="tabla-pagos"><table class="table table-hover mb-0 align-middle"><thead><tr><th>Alumno</th><th>Curso</th><th>Fecha</th><th>Mes</th><th class="text-end">Monto</th><th>Observación</th><th></th></tr></thead><tbody>
+<div class="card shadow-sm"><div class="card-body p-0"><div class="table-responsive" id="tabla-pagos"><table class="table table-hover mb-0 align-middle"><thead><tr><th>Folio</th><th>Alumno</th><th>Curso</th><th>Fecha</th><th>Mes</th><th class="text-end">Monto</th><th>Observación</th><th></th></tr></thead><tbody>
 {% for row in pagos %}
 <tr data-filter-row data-filter-text="{{ row['nombre'] }} {{ row['curso'] or '' }} {{ row['fecha'] }} {{ row['mes'] }} {{ row['observacion'] or '' }} {{ row['monto'] }}">
+  <td><span class="badge text-bg-light border text-dark">#{{ row['folio'] or row['id'] }}</span></td>
   <td><a class="fw-semibold text-decoration-none" href="{{ url_for('alumno_detail', alumno_id=row['alumno_id']) }}">{{ row['nombre'] }}</a></td>
   <td>{{ row['curso'] or '-' }}</td>
   <td>{{ row['fecha'] }}</td>
   <td><span class="status-badge status-info">{{ row['mes'] }}</span></td>
   <td class="text-end">{{ formato_monto(row['monto']) }}</td>
   <td>{{ row['observacion'] or '-' }}</td>
-  <td class="text-end">{% if current_user.can_edit() %}<div class="d-inline-flex gap-2 flex-wrap justify-content-end"><a class="btn btn-sm btn-outline-primary" href="{{ url_for('pagos_edit', pago_id=row['id']) }}">Editar</a><form method="post" action="{{ url_for('pagos_delete', pago_id=row['id']) }}" onsubmit="return confirm('¿Eliminar el pago de {{ row['nombre'] }} para {{ row['mes'] }}?');"><button class="btn btn-sm btn-outline-danger">Eliminar</button></form></div>{% endif %}</td>
+  <td class="text-end">{% if current_user.can_edit() %}<div class="d-inline-flex gap-2 flex-wrap justify-content-end"><a class="btn btn-sm btn-outline-success" href="{{ url_for('pago_comprobante', pago_id=row['id']) }}">Comprobante</a><a class="btn btn-sm btn-outline-primary" href="{{ url_for('pagos_edit', pago_id=row['id']) }}">Editar</a><form method="post" action="{{ url_for('pagos_delete', pago_id=row['id']) }}" onsubmit="return confirm('¿Eliminar el pago de {{ row['nombre'] }} para {{ row['mes'] }}?');"><button class="btn btn-sm btn-outline-danger">Eliminar</button></form></div>{% endif %}</td>
 </tr>
-{% else %}<tr><td colspan="7" class="text-center text-muted py-4">Sin pagos.</td></tr>{% endfor %}
-<tr class="d-none"><td colspan="7" class="text-center text-muted py-4" data-empty-search>No hay resultados para ese filtro rápido.</td></tr>
+{% else %}<tr><td colspan="8" class="text-center text-muted py-4">Sin pagos.</td></tr>{% endfor %}
+<tr class="d-none"><td colspan="8" class="text-center text-muted py-4" data-empty-search>No hay resultados para ese filtro rápido.</td></tr>
 </tbody></table></div></div></div>
 {% endblock %}

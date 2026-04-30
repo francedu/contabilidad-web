@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% block title %}Restablecer contraseña{% endblock %}
+{% block content %}
+<div class="login-wrap">
+  <div class="card shadow login-card border-0">
+    <div class="card-body p-4 p-md-5">
+      <div class="page-eyebrow">Nuevo acceso</div>
+      <h1 class="h3 mb-3">Restablecer contraseña</h1>
+      <p class="text-muted">Usuario: <strong>{{ usuario['username'] }}</strong></p>
+      <form method="post" class="row g-3">
+        <div class="col-12"><label class="form-label">Nueva contraseña</label><input class="form-control form-control-lg" type="password" name="password" required minlength="8"></div>
+        <div class="col-12"><label class="form-label">Confirmar contraseña</label><input class="form-control form-control-lg" type="password" name="confirmacion" required minlength="8"></div>
+        <div class="col-12 d-grid"><button class="btn btn-primary btn-lg">Actualizar contraseña</button></div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

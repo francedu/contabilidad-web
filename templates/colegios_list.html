@@ -1,0 +1,8 @@
+{% extends 'base.html' %}
+{% block title %}Colegios{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3"><h1 class="h3 mb-0">Colegios</h1><a class="btn btn-primary" href="{{ url_for('colegios_new') }}">Nuevo colegio</a></div>
+<div class="card shadow-sm"><div class="card-body p-0"><div class="table-responsive"><table class="table table-hover mb-0 align-middle"><thead><tr><th>Nombre</th><th>Ubicación</th><th>Plan</th><th>Suscripción</th><th>Vence</th><th>Activo</th><th></th></tr></thead><tbody>
+{% for c in colegios %}<tr><td>{{ c['nombre'] }}</td><td>{{ c['ubicacion'] or '-' }}</td><td><span class="badge text-bg-info">{{ (c['plan'] if 'plan' in c.keys() else 'basico')|title }}</span></td><td>{% set est = c['estado_suscripcion'] if 'estado_suscripcion' in c.keys() else 'activo' %}<span class="badge {{ 'text-bg-success' if est == 'activo' else 'text-bg-danger' }}">{{ est|title }}</span></td><td>{{ c['fecha_vencimiento'] or '-' if 'fecha_vencimiento' in c.keys() else '-' }}</td><td>{{ 'Sí' if c['activo'] else 'No' }}</td><td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{{ url_for('colegios_edit', colegio_id=c['id']) }}">Editar</a></td></tr>{% endfor %}
+</tbody></table></div></div></div>
+{% endblock %}
