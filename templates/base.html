@@ -23,7 +23,7 @@
         <a class="nav-link {% if request.endpoint == 'cuotas_view' %}active{% endif %}" href="{{ url_for('cuotas_view') }}">Estado cuotas</a>
         <a class="nav-link {% if request.endpoint == 'morosidad_view' %}active{% endif %}" href="{{ url_for('morosidad_view') }}">Morosidad</a>
         <a class="nav-link {% if request.endpoint == 'notificaciones_view' %}active{% endif %}" href="{{ url_for('notificaciones_view') }}">Notificaciones</a>
-        <a class="nav-link {% if request.endpoint == 'cuotas_configuracion' %}active{% endif %}" href="{{ url_for('cuotas_configuracion') }}">Cuotas mes</a>
+        {% if current_user.can_edit() %}<a class="nav-link {% if request.endpoint == 'cuotas_configuracion' %}active{% endif %}" href="{{ url_for('cuotas_configuracion') }}">Cuotas mes</a>{% endif %}
         <a class="nav-link {% if request.endpoint and request.endpoint.startswith('movimientos') %}active{% endif %}" href="{{ url_for('movimientos_list') }}">Movimientos</a>
         <a class="nav-link {% if request.endpoint and request.endpoint.startswith('actividades') %}active{% endif %}" href="{{ url_for('actividades_list') }}">Actividades</a>
         <a class="nav-link {% if request.endpoint and request.endpoint.startswith('cierres') %}active{% endif %}" href="{{ url_for('cierres_list') }}">Cierres</a>

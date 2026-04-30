@@ -3,7 +3,7 @@
 {% block content %}
 <h1 class="h3 mb-3">{{ 'Editar usuario' if usuario else 'Nuevo usuario' }}</h1>
 <div class="alert alert-info">
-  <strong>Modelo multi colegio:</strong> el rol <code>admin</code> administra toda la plataforma. Los roles <code>presidente</code>, <code>tesorero</code> y <code>secretario</code> se asignan por cada combinación <strong>colegio + curso</strong>.
+  <strong>Modelo multi colegio:</strong> el rol <code>admin</code> administra toda la plataforma. Los roles <code>presidente</code>, <code>tesorero</code>, <code>secretario</code> y <code>apoderado</code> se asignan por cada combinación <strong>colegio + curso</strong>.
 </div>
 <div class="card shadow-sm"><div class="card-body"><form method="post" class="row g-3">
   <div class="col-md-6"><label class="form-label">Nombre</label><input class="form-control" name="nombre" value="{{ usuario['nombre'] if usuario else '' }}" required></div>
@@ -14,7 +14,7 @@
     <select class="form-select" name="role" id="roleSelect">
       {% for role in roles %}<option value="{{ role }}" {% if usuario and usuario['role']==role %}selected{% endif %}>{{ role }}</option>{% endfor %}
     </select>
-    <div class="form-text">Usa <code>admin</code> para acceso total. Para directivas de curso usa presidente/tesorero/secretario y agrega permisos abajo.</div>
+    <div class="form-text">Usa <code>admin</code> para acceso total. Para permisos por curso usa presidente/tesorero/secretario/apoderado y agrega permisos abajo. Apoderado es solo lectura.</div>
   </div>
   <div class="col-md-6"><label class="form-label">{{ 'Nueva contraseña (opcional)' if usuario else 'Contraseña' }}</label><input class="form-control" type="password" name="password" {% if not usuario %}required{% endif %}></div>
 
@@ -45,7 +45,7 @@
             </td>
             <td>
               <select class="form-select form-select-sm" name="perm_rol">
-                {% for r in ['presidente','tesorero','secretario'] %}<option value="{{ r }}" {% if permiso and permiso['rol_curso']==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+                {% for r in ['presidente','tesorero','secretario','apoderado'] %}<option value="{{ r }}" {% if permiso and permiso['rol_curso']==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
               </select>
             </td>
             <td><button class="btn btn-sm btn-outline-danger" type="button" onclick="this.closest('tr').remove()">Quitar</button></td>
