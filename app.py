@@ -1636,7 +1636,7 @@ def create_app() -> Flask:
         db = get_db()
         mes = request.args.get('mes', '').strip()
         sql = """
-            SELECT p.id, p.folio, p.alumno_id, a.nombre, a.curso, p.fecha, p.mes, p.monto, p.observacion, p.movimiento_id
+            SELECT p.id, p.folio, p.alumno_id, a.nombre, a.curso, COALESCE(a.email, '') AS email, p.fecha, p.mes, p.monto, p.observacion, p.movimiento_id
             FROM pagos_alumnos p
             INNER JOIN alumnos a ON a.id = p.alumno_id
             WHERE 1=1
@@ -2204,7 +2204,7 @@ def create_app() -> Flask:
             })
         return render_template('notificaciones.html', mensajes=mensajes, mes=mes)
 
-    def enviar_correo_smtp(destinatario: str, asunto: str, cuerpo: str) -> tuple[bool, str]:
+    def enviar_correo_smtp(destinatario: str, asunto: str, cuerpo: str, adjuntos: list[tuple[str, bytes, str]] | None = None) -> tuple[bool, str]:
         host = os.getenv('SMTP_HOST', '').strip()
         port = int(os.getenv('SMTP_PORT', '587') or 587)
         user = os.getenv('SMTP_USER', '').strip()
@@ -2217,6 +2217,9 @@ def create_app() -> Flask:
         msg['From'] = sender
         msg['To'] = destinatario
         msg.set_content(cuerpo)
+        for nombre_archivo, contenido, mime_type in (adjuntos or []):
+            maintype, subtype = (mime_type.split('/', 1) + ['octet-stream'])[:2] if '/' in mime_type else ('application', 'octet-stream')
+            msg.add_attachment(contenido, maintype=maintype, subtype=subtype, filename=nombre_archivo)
         try:
             with smtplib.SMTP(host, port, timeout=15) as smtp:
                 smtp.starttls()
@@ -2357,18 +2360,12 @@ def create_app() -> Flask:
         bio.seek(0)
         return send_file(bio, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', as_attachment=True, download_name=f'estado_cuotas_{mes}.xlsx')
 
-    @app.route('/pagos/<int:pago_id>/comprobante.pdf')
-    @login_required
-    def pago_comprobante(pago_id: int):
-        db = get_db()
-        pago = fetch_pago_permitido(db, pago_id)
-        if not pago:
-            flash('Pago no encontrado o sin permiso.', 'danger')
-            return redirect(url_for('pagos_list'))
+    def construir_comprobante_pago_pdf(db: DBAdapter, pago_id: int) -> tuple[bytes, str, str, str]:
+        """Genera el PDF del comprobante y retorna: bytes, folio, email destino, alumno."""
         pago = db.fetchone(
             """
             SELECT p.*, a.nombre AS nombre, a.curso AS curso, COALESCE(a.colegio_id, 1) AS colegio_id,
-                   c.nombre AS colegio_nombre
+                   COALESCE(a.email, '') AS email, c.nombre AS colegio_nombre
             FROM pagos_alumnos p
             INNER JOIN alumnos a ON a.id = p.alumno_id
             LEFT JOIN colegios c ON c.id = COALESCE(a.colegio_id, 1)
@@ -2376,13 +2373,16 @@ def create_app() -> Flask:
             """,
             (pago_id,),
         )
+        if not pago:
+            raise ValueError('Pago no encontrado.')
         colegio_id = pago['colegio_id'] if 'colegio_id' in pago.keys() else 1
         colegio = db.fetchone('SELECT nombre, ubicacion FROM colegios WHERE id = ?', (colegio_id,))
         buffer = BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=18*mm, leftMargin=18*mm, topMargin=18*mm, bottomMargin=18*mm)
         styles = getSampleStyleSheet()
         elements = []
-        folio = f'CC-{int(pago_id):06d}'
+        folio_num = pago['folio'] if 'folio' in pago.keys() and pago['folio'] else pago_id
+        folio = f'CC-{int(folio_num):06d}'
         colegio_nombre = colegio['nombre'] if colegio else (pago['colegio_nombre'] if 'colegio_nombre' in pago.keys() else APP_NAME)
         elements.append(Paragraph(APP_NAME, styles['Title']))
         elements.append(Paragraph('Comprobante de pago', styles['Heading2']))
@@ -2414,7 +2414,49 @@ def create_app() -> Flask:
         elements.append(Paragraph('Documento generado automáticamente por ContaCurso.', styles['Normal']))
         doc.build(elements)
         buffer.seek(0)
+        return buffer.getvalue(), folio, (pago['email'] if 'email' in pago.keys() else '') or '', pago['nombre']
+
+    @app.route('/pagos/<int:pago_id>/comprobante.pdf')
+    @login_required
+    def pago_comprobante(pago_id: int):
+        db = get_db()
+        pago = fetch_pago_permitido(db, pago_id)
+        if not pago:
+            flash('Pago no encontrado o sin permiso.', 'danger')
+            return redirect(url_for('pagos_list'))
+        pdf_bytes, folio, _, _ = construir_comprobante_pago_pdf(db, pago_id)
+        buffer = BytesIO(pdf_bytes)
         return send_file(buffer, mimetype='application/pdf', as_attachment=True, download_name=f'comprobante_{folio}.pdf')
+
+    @app.post('/pagos/<int:pago_id>/enviar-comprobante')
+    @login_required
+    @role_required('admin', 'presidente', 'tesorero', 'secretario')
+    def pago_enviar_comprobante(pago_id: int):
+        db = get_db()
+        pago = fetch_pago_permitido(db, pago_id)
+        if not pago:
+            flash('Pago no encontrado o sin permiso.', 'danger')
+            return redirect(url_for('pagos_list'))
+        pdf_bytes, folio, email_destino, alumno_nombre = construir_comprobante_pago_pdf(db, pago_id)
+        if not email_destino:
+            flash('El alumno no tiene correo guardado en su ficha.', 'warning')
+            return redirect(request.referrer or url_for('pagos_list'))
+        asunto = f'Comprobante de pago {folio} - {APP_NAME}'
+        cuerpo = (
+            f'Estimado/a,\n\n'
+            f'Adjuntamos el comprobante de pago {folio} correspondiente al alumno/a {alumno_nombre}.\n\n'
+            f'Este correo fue generado automáticamente por {APP_NAME}.\n'
+        )
+        ok, msg = enviar_correo_smtp(
+            email_destino,
+            asunto,
+            cuerpo,
+            adjuntos=[(f'comprobante_{folio}.pdf', pdf_bytes, 'application/pdf')],
+        )
+        flash(msg, 'success' if ok else 'danger')
+        if ok:
+            log_audit('enviar_correo', 'comprobante_pago', pago_id, f'Comprobante {folio} enviado a {email_destino}')
+        return redirect(request.referrer or url_for('pagos_list'))
 
     @app.errorhandler(500)
     def internal_server_error(exc):
