@@ -2205,19 +2205,38 @@ def create_app() -> Flask:
         return render_template('notificaciones.html', mensajes=mensajes, mes=mes)
 
     def enviar_correo_smtp(destinatario: str, asunto: str, cuerpo: str, adjuntos: list[tuple[str, bytes, str]] | None = None) -> tuple[bool, str]:
-        host = os.getenv('SMTP_HOST', '').strip()
-        port = int(os.getenv('SMTP_PORT', '587') or 587)
-        user = os.getenv('SMTP_USER', '').strip()
-        password = os.getenv('SMTP_PASSWORD', '').strip()
-        sender = os.getenv('SMTP_FROM', user or '').strip()
+        def limpiar_texto_email(valor: object) -> str:
+            # Corrige caracteres invisibles copiados desde formularios/Render,
+            # especialmente NBSP (\xa0), que puede romper smtplib con ASCII.
+            texto = str(valor or '')
+            return (
+                texto.replace('\xa0', ' ')
+                .replace('\u202f', ' ')
+                .replace('\u200b', '')
+                .replace('\ufeff', '')
+                .strip()
+            )
+
+        host = limpiar_texto_email(os.getenv('SMTP_HOST', ''))
+        port = int(limpiar_texto_email(os.getenv('SMTP_PORT', '587')) or 587)
+        user = limpiar_texto_email(os.getenv('SMTP_USER', ''))
+        password = limpiar_texto_email(os.getenv('SMTP_PASSWORD', ''))
+        sender = limpiar_texto_email(os.getenv('SMTP_FROM', user or ''))
+        destinatario = limpiar_texto_email(destinatario)
+        asunto = limpiar_texto_email(asunto)
+        cuerpo = limpiar_texto_email(cuerpo)
         if not host or not sender:
             return False, 'SMTP no configurado. Define SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD y SMTP_FROM.'
+        if not destinatario:
+            return False, 'El destinatario no tiene correo válido.'
         msg = EmailMessage()
         msg['Subject'] = asunto
         msg['From'] = sender
         msg['To'] = destinatario
-        msg.set_content(cuerpo)
+        msg.set_content(cuerpo, charset='utf-8')
         for nombre_archivo, contenido, mime_type in (adjuntos or []):
+            nombre_archivo = limpiar_texto_email(nombre_archivo).replace(' ', '_')
+            mime_type = limpiar_texto_email(mime_type)
             maintype, subtype = (mime_type.split('/', 1) + ['octet-stream'])[:2] if '/' in mime_type else ('application', 'octet-stream')
             msg.add_attachment(contenido, maintype=maintype, subtype=subtype, filename=nombre_archivo)
         try:
