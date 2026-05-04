@@ -1729,10 +1729,37 @@ def create_app() -> Flask:
             elif mes_esta_cerrado(db, alumno_perm['colegio_id'], alumno_perm['curso'], mes) and not current_user.is_admin_global():
                 flash('El mes está cerrado para ese colegio y curso. Solo admin puede modificarlo.', 'danger')
             else:
-                registrar_pago_alumno(db, alumno_id, fecha, mes, monto, observacion, actividad_id, tipo_pago)
+                pago_id = registrar_pago_alumno(db, alumno_id, fecha, mes, monto, observacion, actividad_id, tipo_pago)
                 db.commit()
                 log_audit('crear', 'pago', alumno_id, f'Mes {mes}, monto {monto}')
                 flash('Pago registrado correctamente.', 'success')
+
+                # Envío automático SOLO para pagos de cuota mensual.
+                # Si el alumno no tiene correo o SMTP falla, el pago queda registrado igual.
+                if tipo_pago == 'cuota_mensual' and pago_id:
+                    try:
+                        pdf_bytes, folio, email_destino, alumno_nombre = construir_comprobante_pago_pdf(db, pago_id)
+                        if email_destino:
+                            asunto = f'Comprobante de pago {folio} - {APP_NAME}'
+                            cuerpo = (
+                                f'Estimado/a,\n\n'
+                                f'Adjuntamos el comprobante de pago {folio} correspondiente al alumno/a {alumno_nombre}.\n\n'
+                                f'Este correo fue generado automáticamente por {APP_NAME}.\n'
+                            )
+                            ok, msg = enviar_correo_smtp(
+                                email_destino,
+                                asunto,
+                                cuerpo,
+                                adjuntos=[(f'comprobante_{folio}.pdf', pdf_bytes, 'application/pdf')],
+                            )
+                            flash(('Comprobante enviado automáticamente por correo.' if ok else msg), 'success' if ok else 'warning')
+                            if ok:
+                                log_audit('enviar_correo_auto', 'comprobante_pago', pago_id, f'Comprobante {folio} enviado automáticamente a {email_destino}')
+                        else:
+                            flash('El pago fue registrado, pero el alumno no tiene correo para enviar el comprobante automático.', 'warning')
+                    except Exception as exc:
+                        flash(f'El pago fue registrado, pero no se pudo enviar el comprobante automático: {exc}', 'warning')
+
                 return redirect(url_for('pagos_list', colegio_id=selected_pago_colegio_id) if selected_pago_colegio_id else url_for('pagos_list'))
         return render_template('pagos_form.html', alumnos=alumnos, actividades=actividades, pago=None, selected_pago_colegio_id=selected_pago_colegio_id)
 
@@ -2689,7 +2716,7 @@ def siguiente_folio_pago(db: DBAdapter, colegio_id: int) -> int:
         db.rollback()
         return 1
 
-def registrar_pago_alumno(db: DBAdapter, alumno_id: int, fecha: str, mes: str, monto: float, observacion: str, actividad_id: int | None = None, tipo_pago: str = 'cuota_mensual') -> None:
+def registrar_pago_alumno(db: DBAdapter, alumno_id: int, fecha: str, mes: str, monto: float, observacion: str, actividad_id: int | None = None, tipo_pago: str = 'cuota_mensual') -> int | None:
     alumno = db.fetchone('SELECT * FROM alumnos WHERE id = ?', (alumno_id,))
     if not alumno:
         raise ValueError('Alumno no encontrado')
@@ -2710,10 +2737,18 @@ def registrar_pago_alumno(db: DBAdapter, alumno_id: int, fecha: str, mes: str, m
             movimiento_id = cur.lastrowid
         colegio_id = alumno['colegio_id'] if 'colegio_id' in alumno.keys() else 1
         folio = siguiente_folio_pago(db, int(colegio_id or 1))
-        db.execute(
+        if db.kind == 'postgres':
+            cur = db.execute(
+                'INSERT INTO pagos_alumnos (alumno_id, fecha, mes, monto, observacion, movimiento_id, folio) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id',
+                (alumno_id, fecha, mes, monto, observacion, movimiento_id, folio),
+            )
+            pago_row = cur.fetchone()
+            return int(pago_row['id']) if pago_row else None
+        cur = db.execute(
             'INSERT INTO pagos_alumnos (alumno_id, fecha, mes, monto, observacion, movimiento_id, folio) VALUES (?, ?, ?, ?, ?, ?, ?)',
             (alumno_id, fecha, mes, monto, observacion, movimiento_id, folio),
         )
+        return int(cur.lastrowid)
     else:
         concepto = f'Aporte actividad alumno: {alumno["nombre"]}'
         detalle = observacion if observacion else f'Aporte para actividad registrado en {mes}'
@@ -2721,6 +2756,7 @@ def registrar_pago_alumno(db: DBAdapter, alumno_id: int, fecha: str, mes: str, m
             'INSERT INTO movimientos (fecha, tipo, concepto, monto, actividad_id, alumno_id, observacion, origen, curso, colegio_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (fecha, 'ingreso', concepto, monto, actividad_id, alumno_id, detalle, 'actividad_alumno', alumno['curso'], alumno['colegio_id'] if 'colegio_id' in alumno.keys() else 1),
         )
+        return None
 
 
 def resumen_cuotas_por_alumno(db: DBAdapter, mes: str, curso_scope: str | None = None, colegio_scope: int | None = None):
