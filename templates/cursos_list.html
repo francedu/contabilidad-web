@@ -24,12 +24,13 @@
 </form>
 <div class="card shadow-sm"><div class="card-body p-0"><div class="table-responsive">
 <table class="table table-hover mb-0 align-middle">
-  <thead><tr><th>Colegio</th><th>Curso</th><th>Nivel</th><th>Orden</th><th>Alumnos</th><th>Activo</th><th></th></tr></thead>
+  <thead><tr><th>Colegio</th><th>Curso</th><th>Letra</th><th>Nivel</th><th>Orden</th><th>Alumnos</th><th>Activo</th><th></th></tr></thead>
   <tbody>
     {% for curso in cursos %}
     <tr>
       <td>{{ curso['colegio_nombre'] }}</td>
       <td class="fw-semibold">{{ curso['nombre'] }}</td>
+      <td>{{ curso['letra'] or 'Sin letra' }}</td>
       <td>{{ curso['nivel'] or '-' }}</td>
       <td>{{ curso['orden'] }}</td>
       <td>{{ curso['alumnos'] or 0 }}</td>
@@ -39,10 +40,13 @@
         <form method="post" action="{{ url_for('cursos_toggle', curso_id=curso['id']) }}" class="d-inline">
           <button class="btn btn-sm btn-outline-secondary">{{ 'Desactivar' if curso['activo'] else 'Activar' }}</button>
         </form>
+        <form method="post" action="{{ url_for('cursos_delete', curso_id=curso['id']) }}" class="d-inline" onsubmit="return confirm('¿Eliminar este curso? Solo se eliminará si no tiene alumnos, pagos, movimientos ni permisos asociados.');">
+          <button class="btn btn-sm btn-outline-danger">Eliminar</button>
+        </form>
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="7" class="text-center text-muted py-4">No hay cursos configurados.</td></tr>
+    <tr><td colspan="8" class="text-center text-muted py-4">No hay cursos configurados.</td></tr>
     {% endfor %}
   </tbody>
 </table>

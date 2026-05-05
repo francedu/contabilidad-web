@@ -1,9 +1,11 @@
 {% extends 'base.html' %}
 {% block title %}Curso{% endblock %}
 {% block content %}
+{% set base_val = curso_base_actual if curso else '' %}
+{% set letra_val = letra_actual if curso else '' %}
 <h1 class="h3 mb-3">{{ 'Editar curso' if curso else 'Nuevo curso' }}</h1>
 <div class="alert alert-info">
-  Los cursos ahora pertenecen a un colegio. Puedes tener el mismo nombre, por ejemplo <strong>1° Medio</strong>, en distintos colegios sin mezclar datos.
+  Los cursos pertenecen a un colegio. Selecciona el curso base y, si corresponde, una letra. Si no aplica, usa <strong>Sin letra</strong>.
 </div>
 <div class="card shadow-sm"><div class="card-body"><form method="post" class="row g-3">
   <div class="col-md-5">
@@ -19,19 +21,65 @@
       </select>
     {% endif %}
   </div>
+
   <div class="col-md-4">
-    <label class="form-label">Nombre del curso</label>
-    <input class="form-control" name="nombre" value="{{ curso['nombre'] if curso else '' }}" required placeholder="Ej. 1° Medio A">
+    <label class="form-label">Curso base</label>
+    <select class="form-select" name="curso_base" id="cursoBaseSelect" required>
+      <option value="">Seleccionar curso</option>
+      {% for base in base_course_options %}
+        <option value="{{ base }}" {% if base_val == base %}selected{% endif %}>{{ base }}</option>
+      {% endfor %}
+      <option value="__otro__" {% if base_val and base_val not in base_course_options %}selected{% endif %}>Otro curso personalizado</option>
+    </select>
+  </div>
+
+  <div class="col-md-3">
+    <label class="form-label">Letra</label>
+    <select class="form-select" name="letra">
+      <option value="" {% if not letra_val %}selected{% endif %}>Sin letra</option>
+      {% for letra in course_letters if letra %}
+        <option value="{{ letra }}" {% if letra_val == letra %}selected{% endif %}>{{ letra }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="col-md-5" id="nombreManualWrap" style="display:none;">
+    <label class="form-label">Nombre personalizado</label>
+    <input class="form-control" name="nombre_manual" value="{{ base_val if base_val and base_val not in base_course_options else '' }}" placeholder="Ej. Taller especial">
+    <div class="form-text">Se combinará con la letra si seleccionas una.</div>
+  </div>
+
+  <div class="col-md-4">
+    <label class="form-label">Nivel</label>
+    <input class="form-control" name="nivel" value="{{ curso['nivel'] if curso else '' }}" placeholder="Ej. Básica, Media">
   </div>
   <div class="col-md-2">
-    <label class="form-label">Nivel</label>
-    <input class="form-control" name="nivel" value="{{ curso['nivel'] if curso else '' }}" placeholder="Media">
-  </div>
-  <div class="col-md-1">
     <label class="form-label">Orden</label>
-    <input class="form-control" type="number" name="orden" value="{{ curso['orden'] if curso else 999 }}">
+    <input class="form-control" type="number" name="orden" value="{{ curso['orden'] if curso else '' }}" placeholder="Auto">
   </div>
-  <div class="col-12 form-check ms-2"><input class="form-check-input" type="checkbox" name="activo" {% if not curso or curso['activo'] %}checked{% endif %}><label class="form-check-label">Curso activo</label></div>
-  <div class="col-12 d-flex gap-2"><button class="btn btn-primary">Guardar</button><a class="btn btn-outline-secondary" href="{{ url_for('cursos_list') }}">Cancelar</a></div>
+  <div class="col-12 form-check ms-2">
+    <input class="form-check-input" type="checkbox" name="activo" {% if not curso or curso['activo'] %}checked{% endif %}>
+    <label class="form-check-label">Curso activo</label>
+  </div>
+  <div class="col-12 d-flex gap-2">
+    <button class="btn btn-primary">Guardar</button>
+    <a class="btn btn-outline-secondary" href="{{ url_for('cursos_list') }}">Cancelar</a>
+  </div>
 </form></div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function(){
+  const select = document.getElementById('cursoBaseSelect');
+  const wrap = document.getElementById('nombreManualWrap');
+  function toggleManual(){
+    if (!select || !wrap) return;
+    wrap.style.display = select.value === '__otro__' ? '' : 'none';
+  }
+  if (select) {
+    select.addEventListener('change', toggleManual);
+    toggleManual();
+  }
+})();
+</script>
 {% endblock %}

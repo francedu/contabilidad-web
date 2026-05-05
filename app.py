@@ -70,6 +70,60 @@ PREDEFINED_COURSES = [
     '4° Medio',
 ]
 
+COURSE_LETTERS = ['', 'A', 'B', 'C', 'D', 'E', 'F']
+
+
+def split_course_base_letter(nombre: str | None) -> tuple[str, str]:
+    """Devuelve (curso_base, letra). Compatible con cursos antiguos.
+
+    Ejemplos:
+    - '1° Básico A' -> ('1° Básico', 'A')
+    - '1° Básico' -> ('1° Básico', '')
+    - 'Taller Especial B' -> ('Taller Especial', 'B')
+    """
+    raw = (nombre or '').strip()
+    if not raw:
+        return '', ''
+    parts = raw.rsplit(' ', 1)
+    if len(parts) == 2 and parts[1].strip().upper() in COURSE_LETTERS[1:]:
+        base = parts[0].strip()
+        letra = parts[1].strip().upper()
+        return base, letra
+    return raw, ''
+
+
+def compose_course_name(base: str | None, letra: str | None) -> str:
+    base = (base or '').strip()
+    letra = (letra or '').strip().upper()
+    if letra in ('', 'SIN LETRA', 'SIN_LETRA', 'NONE', 'NO'):
+        letra = ''
+    if letra and letra not in COURSE_LETTERS[1:]:
+        letra = ''
+    return f"{base} {letra}".strip()
+
+
+def infer_course_level(base: str | None) -> str:
+    base = (base or '').lower()
+    if 'medio' in base:
+        return 'Media'
+    if 'básico' in base or 'basico' in base:
+        return 'Básica'
+    if 'kínder' in base or 'kinder' in base:
+        return 'Parvularia'
+    return ''
+
+
+def infer_course_order(base: str | None, letra: str | None = '') -> int:
+    base_norm = normalize_course_value(base)
+    canonical = standardize_course_name(base) or (base or '').strip()
+    try:
+        base_order = PREDEFINED_COURSES.index(canonical) + 1
+    except ValueError:
+        base_order = 999
+    letra = (letra or '').strip().upper()
+    letra_offset = 0 if not letra else max(1, ord(letra[0]) - ord('A') + 1)
+    return base_order * 10 + letra_offset
+
 COURSE_NORMALIZATION_MAP = {
     'Prekínder': ['prekinder', 'pre kinder', 'pre-kinder', 'pre kínder', 'prekínder'],
     'Kínder': ['kinder', 'kínder'],
@@ -247,6 +301,8 @@ def create_app() -> Flask:
             'selected_admin_course': admin_selected_course(),
             'available_courses': get_available_courses(),
             'predefined_courses': get_available_courses(include_dynamic=True),
+            'base_course_options': PREDEFINED_COURSES,
+            'course_letters': COURSE_LETTERS,
             'courses_by_school': get_courses_by_school(),
             'colegios': get_colegios(),
             'selected_colegio_id': selected_colegio_id(),
@@ -1139,21 +1195,30 @@ def create_app() -> Flask:
         colegio_default = request.args.get('colegio_id', '').strip()
         if request.method == 'POST':
             colegio_raw = request.form.get('colegio_id', '').strip()
-            nombre = standardize_course_name(request.form.get('nombre', '').strip()) or request.form.get('nombre', '').strip()
-            nivel = request.form.get('nivel', '').strip() or None
-            orden = int(request.form.get('orden') or 999)
+            curso_base = request.form.get('curso_base', '').strip()
+            letra = request.form.get('letra', '').strip().upper()
+            nombre_manual = request.form.get('nombre_manual', '').strip()
+            if curso_base == '__otro__':
+                curso_base = nombre_manual
+            curso_base = standardize_course_name(curso_base) or curso_base
+            if letra not in COURSE_LETTERS:
+                letra = ''
+            nombre = compose_course_name(curso_base, letra)
+            nivel = request.form.get('nivel', '').strip() or infer_course_level(curso_base) or None
+            orden = int(request.form.get('orden') or infer_course_order(curso_base, letra) or 999)
             activo = 1 if request.form.get('activo') == 'on' else 0
             if not colegio_raw.isdigit():
                 flash('Debes seleccionar colegio.', 'danger')
-            elif not nombre:
-                flash('El nombre del curso es obligatorio.', 'danger')
+            elif not curso_base:
+                flash('Debes seleccionar o escribir el curso base.', 'danger')
             elif db.fetchone('SELECT 1 FROM cursos WHERE colegio_id=? AND lower(trim(nombre))=lower(trim(?))', (int(colegio_raw), nombre)):
                 flash('Ese curso ya existe para ese colegio.', 'warning')
             else:
-                db.execute('INSERT INTO cursos (colegio_id, nombre, nivel, orden, activo) VALUES (?, ?, ?, ?, ?)',
-                           (int(colegio_raw), nombre, nivel, orden, activo))
+                db.execute('INSERT INTO cursos (colegio_id, nombre, curso_base, letra, nivel, orden, activo) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                           (int(colegio_raw), nombre, curso_base, letra, nivel, orden, activo))
                 db.commit()
-                log_audit('crear', 'curso', db.fetchone('SELECT MAX(id) AS id FROM cursos')['id'], nombre, int(colegio_raw), nombre)
+                row = db.fetchone('SELECT MAX(id) AS id FROM cursos')
+                log_audit('crear', 'curso', row['id'] if row else None, nombre, int(colegio_raw), nombre)
                 flash('Curso creado.', 'success')
                 return redirect(url_for('cursos_list', colegio_id=colegio_raw))
         return render_template('cursos_form.html', curso=None, colegio_default=colegio_default)
@@ -1167,17 +1232,25 @@ def create_app() -> Flask:
             flash('Curso no encontrado.', 'danger')
             return redirect(url_for('cursos_list'))
         if request.method == 'POST':
-            nombre = standardize_course_name(request.form.get('nombre', '').strip()) or request.form.get('nombre', '').strip()
-            nivel = request.form.get('nivel', '').strip() or None
-            orden = int(request.form.get('orden') or 999)
+            curso_base = request.form.get('curso_base', '').strip()
+            letra = request.form.get('letra', '').strip().upper()
+            nombre_manual = request.form.get('nombre_manual', '').strip()
+            if curso_base == '__otro__':
+                curso_base = nombre_manual
+            curso_base = standardize_course_name(curso_base) or curso_base
+            if letra not in COURSE_LETTERS:
+                letra = ''
+            nombre = compose_course_name(curso_base, letra)
+            nivel = request.form.get('nivel', '').strip() or infer_course_level(curso_base) or None
+            orden = int(request.form.get('orden') or infer_course_order(curso_base, letra) or 999)
             activo = 1 if request.form.get('activo') == 'on' else 0
-            if not nombre:
-                flash('El nombre del curso es obligatorio.', 'danger')
+            if not curso_base:
+                flash('Debes seleccionar o escribir el curso base.', 'danger')
             elif db.fetchone('SELECT 1 FROM cursos WHERE colegio_id=? AND lower(trim(nombre))=lower(trim(?)) AND id<>?', (curso['colegio_id'], nombre, curso_id)):
                 flash('Ese curso ya existe para ese colegio.', 'warning')
             else:
                 nombre_anterior = curso['nombre']
-                db.execute('UPDATE cursos SET nombre=?, nivel=?, orden=?, activo=? WHERE id=?', (nombre, nivel, orden, activo, curso_id))
+                db.execute('UPDATE cursos SET nombre=?, curso_base=?, letra=?, nivel=?, orden=?, activo=? WHERE id=?', (nombre, curso_base, letra, nivel, orden, activo, curso_id))
                 # Mantener coherencia si se renombra: actualiza referencias de ese colegio al mismo curso.
                 if normalize_course(nombre_anterior) != normalize_course(nombre):
                     for tabla in ['alumnos', 'actividades', 'movimientos', 'usuario_roles_curso', 'cierres_mensuales', 'cuotas_mensuales']:
@@ -1189,7 +1262,15 @@ def create_app() -> Flask:
                 log_audit('editar', 'curso', curso_id, f"{nombre_anterior} -> {nombre}", int(curso['colegio_id']), nombre)
                 flash('Curso actualizado.', 'success')
                 return redirect(url_for('cursos_list', colegio_id=curso['colegio_id']))
-        return render_template('cursos_form.html', curso=curso, colegio_default=str(curso['colegio_id']))
+        # Compatibilidad: si curso_base/letra todavía están vacíos, se calculan desde nombre.
+        try:
+            base_actual = (curso['curso_base'] or '').strip()
+            letra_actual = (curso['letra'] or '').strip().upper()
+        except Exception:
+            base_actual, letra_actual = '', ''
+        if not base_actual:
+            base_actual, letra_actual = split_course_base_letter(curso['nombre'])
+        return render_template('cursos_form.html', curso=curso, colegio_default=str(curso['colegio_id']), curso_base_actual=base_actual, letra_actual=letra_actual)
 
     @app.post('/cursos/<int:curso_id>/desactivar')
     @role_required('admin')
@@ -1204,6 +1285,30 @@ def create_app() -> Flask:
         db.commit()
         log_audit('activar' if nuevo_estado else 'desactivar', 'curso', curso_id, curso['nombre'], int(curso['colegio_id']), curso['nombre'])
         flash('Curso actualizado.', 'success')
+        return redirect(url_for('cursos_list', colegio_id=curso['colegio_id']))
+
+    @app.post('/cursos/<int:curso_id>/eliminar')
+    @role_required('admin')
+    def cursos_delete(curso_id: int):
+        db = get_db()
+        curso = db.fetchone('SELECT * FROM cursos WHERE id=?', (curso_id,))
+        if not curso:
+            flash('Curso no encontrado.', 'danger')
+            return redirect(url_for('cursos_list'))
+        dependencias = 0
+        for tabla in ['alumnos', 'actividades', 'movimientos', 'usuario_roles_curso', 'cierres_mensuales', 'cuotas_mensuales']:
+            try:
+                row = db.fetchone(f"SELECT COUNT(*) AS total FROM {tabla} WHERE colegio_id=? AND lower(trim(curso))=lower(trim(?))", (curso['colegio_id'], curso['nombre']))
+                dependencias += int(row['total'] or 0) if row else 0
+            except Exception:
+                db.rollback()
+        if dependencias > 0:
+            flash(f"No se puede eliminar el curso porque tiene {dependencias} registro(s) asociado(s). Puedes desactivarlo para que no aparezca en nuevos formularios.", 'warning')
+            return redirect(url_for('cursos_list', colegio_id=curso['colegio_id']))
+        db.execute('DELETE FROM cursos WHERE id=?', (curso_id,))
+        db.commit()
+        log_audit('eliminar', 'curso', curso_id, curso['nombre'], int(curso['colegio_id']), curso['nombre'])
+        flash('Curso eliminado.', 'success')
         return redirect(url_for('cursos_list', colegio_id=curso['colegio_id']))
 
     @app.get('/backups/<path:nombre>')
@@ -3144,6 +3249,8 @@ def init_db(db: DBAdapter) -> None:
             id BIGSERIAL PRIMARY KEY,
             colegio_id BIGINT NOT NULL,
             nombre TEXT NOT NULL,
+            curso_base TEXT,
+            letra TEXT NOT NULL DEFAULT '',
             nivel TEXT,
             orden INTEGER NOT NULL DEFAULT 0,
             activo INTEGER NOT NULL DEFAULT 1,
@@ -3289,6 +3396,8 @@ def init_db(db: DBAdapter) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             colegio_id INTEGER NOT NULL,
             nombre TEXT NOT NULL,
+            curso_base TEXT,
+            letra TEXT NOT NULL DEFAULT '',
             nivel TEXT,
             orden INTEGER NOT NULL DEFAULT 0,
             activo INTEGER NOT NULL DEFAULT 1,
@@ -3448,6 +3557,8 @@ def init_db(db: DBAdapter) -> None:
             'ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS email TEXT',
             'ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS curso TEXT',
             'ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS colegio_id BIGINT',
+            'ALTER TABLE cursos ADD COLUMN IF NOT EXISTS curso_base TEXT',
+            "ALTER TABLE cursos ADD COLUMN IF NOT EXISTS letra TEXT NOT NULL DEFAULT ''",
         ]
     else:
         migration_statements = [
@@ -3476,6 +3587,8 @@ def init_db(db: DBAdapter) -> None:
             'ALTER TABLE usuarios ADD COLUMN email TEXT',
             'ALTER TABLE usuarios ADD COLUMN curso TEXT',
             'ALTER TABLE usuarios ADD COLUMN colegio_id INTEGER',
+            'ALTER TABLE cursos ADD COLUMN curso_base TEXT',
+            "ALTER TABLE cursos ADD COLUMN letra TEXT NOT NULL DEFAULT ''",
         ]
 
     for statement in migration_statements:
@@ -3542,6 +3655,16 @@ def init_db(db: DBAdapter) -> None:
             db.commit()
         except Exception:
             db.rollback()
+
+
+    # Completar curso_base/letra para cursos existentes sin romper nombres actuales.
+    try:
+        for row in db.fetchall("SELECT id, nombre FROM cursos WHERE curso_base IS NULL OR trim(COALESCE(curso_base, '')) = ''"):
+            base, letra = split_course_base_letter(row['nombre'])
+            db.execute('UPDATE cursos SET curso_base=?, letra=? WHERE id=?', (base, letra, row['id']))
+        db.commit()
+    except Exception:
+        db.rollback()
 
 
     # Crear índices después de ejecutar las migraciones. En SQLite, si la tabla ya existía
@@ -3614,8 +3737,8 @@ def init_db(db: DBAdapter) -> None:
             cid = int(colegio['id'])
             for idx_curso, nombre_curso in enumerate(base_courses, start=1):
                 try:
-                    db.execute('INSERT INTO cursos (colegio_id, nombre, nivel, orden, activo) VALUES (?, ?, ?, ?, 1)',
-                               (cid, nombre_curso, 'base', idx_curso))
+                    db.execute('INSERT INTO cursos (colegio_id, nombre, curso_base, letra, nivel, orden, activo) VALUES (?, ?, ?, ?, ?, ?, 1)',
+                               (cid, nombre_curso, nombre_curso, '', infer_course_level(nombre_curso) or 'base', idx_curso * 10))
                     db.commit()
                 except Exception:
                     db.rollback()
@@ -3632,8 +3755,8 @@ def init_db(db: DBAdapter) -> None:
                 if not nombre:
                     continue
                 try:
-                    db.execute('INSERT INTO cursos (colegio_id, nombre, nivel, orden, activo) VALUES (?, ?, ?, ?, 1)',
-                               (cid, nombre, 'historico', 999))
+                    db.execute('INSERT INTO cursos (colegio_id, nombre, curso_base, letra, nivel, orden, activo) VALUES (?, ?, ?, ?, ?, ?, 1)',
+                               (cid, nombre, split_course_base_letter(nombre)[0], split_course_base_letter(nombre)[1], 'historico', 999))
                     db.commit()
                 except Exception:
                     db.rollback()
