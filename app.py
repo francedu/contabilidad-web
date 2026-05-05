@@ -306,6 +306,7 @@ def create_app() -> Flask:
             'courses_by_school': get_courses_by_school(),
             'colegios': get_colegios(),
             'selected_colegio_id': selected_colegio_id(),
+            'current_colegio_id': effective_colegio_id(),
             'current_colegio_nombre': current_colegio_nombre(),
             'is_admin_global': current_user.is_authenticated and current_user.is_admin_global(),
             'current_permissions': user_course_permissions(),
@@ -404,13 +405,11 @@ def create_app() -> Flask:
         for key in ('colegio_id', 'selected_colegio_id'):
             raw = request.form.get(key) or request.args.get(key)
             if raw and str(raw).isdigit():
-                return int(raw)
-        if current_user.is_authenticated and not current_user.is_admin_global():
-            try:
-                return int(current_user.colegio_id) if current_user.colegio_id else None
-            except Exception:
-                return None
-        return selected_colegio_id() if current_user.is_authenticated and current_user.is_admin_global() else None
+                cid = int(raw)
+                if current_user.is_authenticated and not current_user.is_admin_global():
+                    return cid if cid in user_allowed_colegio_ids() else None
+                return cid
+        return effective_colegio_id()
 
     @app.before_request
     def bloquear_colegios_vencidos():
@@ -442,7 +441,7 @@ def create_app() -> Flask:
         if not current_user.is_authenticated:
             return None
         db = get_db()
-        cid = selected_colegio_id() if current_user.is_admin_global() else getattr(current_user, 'colegio_id', None)
+        cid = effective_colegio_id()
         if cid:
             try:
                 row = db.fetchone('SELECT nombre FROM colegios WHERE id = ?', (int(cid),))
@@ -452,6 +451,9 @@ def create_app() -> Flask:
                 return None
         if current_user.is_admin_global():
             return 'Todos los colegios'
+        allowed = user_allowed_colegio_ids()
+        if len(allowed) > 1:
+            return f'{len(allowed)} colegios asignados'
         return None
 
     def user_course_permissions(user_id: int | None = None) -> list[Any]:
@@ -469,6 +471,49 @@ def create_app() -> Flask:
             """, (uid,))
         except Exception:
             return []
+
+    def user_allowed_colegio_ids(user_id: int | None = None) -> list[int]:
+        """Colegios a los que puede acceder un usuario no-admin.
+
+        Prioriza la tabla usuario_roles_curso. Si un usuario antiguo no tiene
+        permisos por curso, cae al colegio_id del usuario. Nunca cae por
+        defecto al colegio 1, para evitar fugas entre colegios.
+        """
+        if not current_user.is_authenticated:
+            return []
+        permisos = user_course_permissions(user_id)
+        ids: list[int] = []
+        for permiso in permisos:
+            try:
+                cid = int(permiso['colegio_id'])
+                if cid not in ids:
+                    ids.append(cid)
+            except Exception:
+                continue
+        if ids:
+            return ids
+        try:
+            cid = int(getattr(current_user, 'colegio_id', None) or 0)
+            return [cid] if cid else []
+        except Exception:
+            return []
+
+    def effective_colegio_id() -> int | None:
+        """Colegio efectivo para contexto visual y filtros.
+
+        - Admin global: usa filtro colegio_id si viene en la URL; si no, None.
+        - Usuarios normales: usa solo colegios permitidos. Si viene un colegio
+          no permitido en la URL, se ignora y se usa el primer colegio permitido.
+        """
+        if not current_user.is_authenticated:
+            return None
+        raw_selected = selected_colegio_id()
+        if current_user.is_admin_global():
+            return raw_selected
+        allowed = user_allowed_colegio_ids()
+        if raw_selected and raw_selected in allowed:
+            return raw_selected
+        return allowed[0] if allowed else None
 
     def user_course_scope() -> str | None:
         if not current_user.is_authenticated or current_user.is_admin_global():
@@ -575,7 +620,10 @@ def create_app() -> Flask:
                 sql += ' AND 1=0'
             return sql, params
 
-        colegio_id = getattr(current_user, 'colegio_id', None) or 1
+        colegio_id = effective_colegio_id()
+        if not colegio_id:
+            sql += ' AND 1=0'
+            return sql, params
         curso = (getattr(current_user, 'curso', None) or '').strip()
         sql += f" AND {colegio_expr} = ?"
         params.append(colegio_id)
@@ -595,12 +643,14 @@ def create_app() -> Flask:
     def ensure_course_access(curso: str | None, colegio_id: int | None = None) -> bool:
         if not current_user.is_authenticated or current_user.is_admin_global():
             return True
-        colegio_id = colegio_id or getattr(current_user, 'colegio_id', None) or 1
+        colegio_id = colegio_id or effective_colegio_id()
+        if not colegio_id:
+            return False
         permisos = user_course_permissions()
         if permisos:
             return any(int(p['colegio_id']) == int(colegio_id) and normalize_course(p['curso']) == normalize_course(curso) for p in permisos)
         scope = (getattr(current_user, 'curso', None) or '').strip()
-        return (not scope or normalize_course(scope) == normalize_course(curso)) and int(colegio_id) == int(getattr(current_user, 'colegio_id', None) or 1)
+        return (not scope or normalize_course(scope) == normalize_course(curso)) and int(colegio_id) in user_allowed_colegio_ids()
 
     def mes_esta_cerrado(db: DBAdapter, colegio_id: int | None, curso: str | None, fecha_o_mes: str | None) -> bool:
         """Retorna True si existe un cierre mensual para colegio+curso+mes."""
@@ -626,15 +676,15 @@ def create_app() -> Flask:
         )
         return float(row['monto']) if row else 0.0
 
-    def resolve_colegio_for_course(curso: str | None) -> int:
+    def resolve_colegio_for_course(curso: str | None) -> int | None:
         if current_user.is_authenticated and current_user.is_admin_global():
             raw = (request.form.get('colegio_id') or request.args.get('colegio_id') or '').strip()
-            return int(raw) if raw.isdigit() else 1
+            return int(raw) if raw.isdigit() else effective_colegio_id()
         permisos = user_course_permissions()
         for p in permisos:
             if normalize_course(p['curso']) == normalize_course(curso):
                 return int(p['colegio_id'])
-        return int(getattr(current_user, 'colegio_id', None) or 1)
+        return effective_colegio_id()
 
     def fetch_pago_permitido(db: DBAdapter, pago_id: int):
         pago = db.fetchone(
@@ -1538,21 +1588,32 @@ def create_app() -> Flask:
             permisos_por_usuario.setdefault(int(row['usuario_id']), []).append(row)
         return render_template('usuarios_list.html', usuarios=usuarios, permisos_por_usuario=permisos_por_usuario)
 
-    def guardar_permisos_usuario(db: DBAdapter, user_id: int, role: str) -> None:
+    def guardar_permisos_usuario(db: DBAdapter, user_id: int, role: str) -> tuple[int | None, str | None]:
         db.execute('DELETE FROM usuario_roles_curso WHERE usuario_id=?', (user_id,))
         if role in ('admin', 'admin_global'):
-            return
+            db.execute('UPDATE usuarios SET colegio_id=NULL, curso=NULL WHERE id=?', (user_id,))
+            return None, None
         colegios_form = request.form.getlist('perm_colegio_id')
         cursos_form = request.form.getlist('perm_curso')
         roles_form = request.form.getlist('perm_rol')
+        primer_colegio_id: int | None = None
+        primer_curso: str | None = None
         for colegio_id, curso, rol_curso in zip(colegios_form, cursos_form, roles_form):
             curso = (curso or '').strip()
             if not colegio_id or not str(colegio_id).isdigit() or not curso or rol_curso not in COURSE_ROLES:
                 continue
+            cid = int(colegio_id)
+            if primer_colegio_id is None:
+                primer_colegio_id = cid
+                primer_curso = curso
             db.execute(
                 'INSERT INTO usuario_roles_curso (usuario_id, colegio_id, curso, rol_curso) VALUES (?, ?, ?, ?)',
-                (user_id, int(colegio_id), curso, rol_curso),
+                (user_id, cid, curso, rol_curso),
             )
+        # Compatibilidad: mantener colegio_id/curso del usuario apuntando al primer permiso.
+        # Esto evita que usuarios nuevos caigan al colegio 1 por defecto.
+        db.execute('UPDATE usuarios SET colegio_id=?, curso=? WHERE id=?', (primer_colegio_id, primer_curso, user_id))
+        return primer_colegio_id, primer_curso
 
     @app.route('/usuarios/nuevo', methods=['GET', 'POST'])
     @role_required('admin')
@@ -1576,7 +1637,7 @@ def create_app() -> Flask:
             else:
                 db.execute(
                     'INSERT INTO usuarios (username, email, password_hash, role, nombre, curso, colegio_id, activo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                    (username, email or None, generate_password_hash(password), role, nombre, None, None if role in ('admin', 'admin_global') else 1, activo)
+                    (username, email or None, generate_password_hash(password), role, nombre, None, None, activo)
                 )
                 new_user = db.fetchone('SELECT id FROM usuarios WHERE lower(username)=?', (username,))
                 if new_user:
@@ -1610,7 +1671,7 @@ def create_app() -> Flask:
             elif email and db.fetchone("SELECT 1 FROM usuarios WHERE lower(COALESCE(email,''))=? AND id<>?", (email, user_id)):
                 flash('Ese correo ya existe.', 'danger')
             else:
-                colegio_id = None if role in ('admin', 'admin_global') else 1
+                colegio_id = None
                 if password:
                     db.execute('UPDATE usuarios SET nombre=?, username=?, email=?, role=?, curso=?, colegio_id=?, activo=?, password_hash=? WHERE id=?',
                                (nombre, username, email or None, role, None, colegio_id, activo, generate_password_hash(password), user_id))
@@ -3662,6 +3723,26 @@ def init_db(db: DBAdapter) -> None:
         for row in db.fetchall("SELECT id, nombre FROM cursos WHERE curso_base IS NULL OR trim(COALESCE(curso_base, '')) = ''"):
             base, letra = split_course_base_letter(row['nombre'])
             db.execute('UPDATE cursos SET curso_base=?, letra=? WHERE id=?', (base, letra, row['id']))
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
+    # Reparación multi-colegio: usuarios existentes creados antes de esta versión
+    # podían quedar con colegio_id=1 aunque sus permisos por curso fueran de otro colegio.
+    # Se sincroniza colegio_id/curso con el primer permiso real del usuario.
+    try:
+        for row in db.fetchall("""
+            SELECT usuario_id, MIN(id) AS first_perm_id
+            FROM usuario_roles_curso
+            GROUP BY usuario_id
+        """):
+            permiso = db.fetchone('SELECT colegio_id, curso FROM usuario_roles_curso WHERE id=?', (row['first_perm_id'],))
+            if permiso:
+                db.execute(
+                    "UPDATE usuarios SET colegio_id=?, curso=? WHERE id=? AND role NOT IN ('admin','admin_global')",
+                    (permiso['colegio_id'], permiso['curso'], row['usuario_id'])
+                )
         db.commit()
     except Exception:
         db.rollback()
