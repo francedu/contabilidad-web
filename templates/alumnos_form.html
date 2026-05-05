@@ -1,34 +1,5 @@
 {% extends 'base.html' %}
 {% block title %}Alumno{% endblock %}
-{% block scripts %}
-<script>
-const coursesBySchool = {{ courses_by_school|tojson }};
-const defaultCourses = {{ predefined_courses|tojson }};
-function fillCourseSelect(select, schoolId) {
-  if (!select) return;
-  const selected = select.dataset.selectedCourse || select.value || '';
-  const cursos = (schoolId && coursesBySchool[String(schoolId)]) ? coursesBySchool[String(schoolId)] : defaultCourses;
-  select.innerHTML = '<option value="">Seleccionar curso</option>';
-  cursos.forEach((curso) => {
-    const opt = document.createElement('option');
-    opt.value = curso; opt.textContent = curso;
-    if (curso === selected) opt.selected = true;
-    select.appendChild(opt);
-  });
-  if (selected && !Array.from(select.options).some(o => o.value === selected)) {
-    const opt = document.createElement('option');
-    opt.value = selected; opt.textContent = selected; opt.selected = true;
-    select.appendChild(opt);
-  }
-}
-const schoolSelect = document.querySelector('[data-course-school]');
-const courseSelect = document.querySelector('[data-course-select]');
-if (schoolSelect && courseSelect) {
-  fillCourseSelect(courseSelect, schoolSelect.value);
-  schoolSelect.addEventListener('change', () => { courseSelect.dataset.selectedCourse = ''; fillCourseSelect(courseSelect, schoolSelect.value); });
-}
-</script>
-{% endblock %}
 {% block content %}
 <div class="form-shell mx-auto">
   <div class="page-head mb-3">

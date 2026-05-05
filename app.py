@@ -290,19 +290,26 @@ def create_app() -> Flask:
             return wrapper
         return decorator
 
-    def log_audit(accion: str, entidad: str, entidad_id: Any = None, detalle: str = '') -> None:
-        """Registra acciones importantes para trazabilidad. No debe romper la operación principal."""
+    def log_audit(accion: str, entidad: str, entidad_id: Any = None, detalle: str = '', colegio_id: Any = None, curso: str | None = None) -> None:
+        """Registra acciones importantes para trazabilidad. Nunca debe romper la operación principal.
+
+        Compatibilidad: acepta colegio_id y curso opcionales porque varias rutas los envían
+        al auditar cursos/colegios. Si no vienen, usa el contexto actual del usuario.
+        """
         try:
             db = get_db()
             user_id = int(current_user.id) if current_user.is_authenticated else None
             username = current_user.username if current_user.is_authenticated else 'anonimo'
-            colegio_id = selected_colegio_id() if current_user.is_authenticated and current_user.is_admin_global() else getattr(current_user, 'colegio_id', None)
+            if colegio_id is None:
+                colegio_id = selected_colegio_id() if current_user.is_authenticated and current_user.is_admin_global() else getattr(current_user, 'colegio_id', None)
+            if curso is None:
+                curso = current_course_filter()
             ip = request.headers.get('X-Forwarded-For', request.remote_addr or '').split(',')[0].strip()[:80]
             db.execute(
                 '''INSERT INTO auditoria_acciones
                    (fecha, usuario_id, username, accion, entidad, entidad_id, colegio_id, curso, detalle, ip)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), user_id, username, accion, entidad, str(entidad_id or ''), colegio_id, current_course_filter(), detalle[:500], ip),
+                (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), user_id, username, accion, entidad, str(entidad_id or ''), colegio_id, curso, (detalle or '')[:500], ip),
             )
             db.commit()
         except Exception:
