@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% block title %}Curso{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">{{ 'Editar curso' if curso else 'Nuevo curso' }}</h1>
+<div class="alert alert-info">
+  Los cursos ahora pertenecen a un colegio. Puedes tener el mismo nombre, por ejemplo <strong>1° Medio</strong>, en distintos colegios sin mezclar datos.
+</div>
+<div class="card shadow-sm"><div class="card-body"><form method="post" class="row g-3">
+  <div class="col-md-5">
+    <label class="form-label">Colegio</label>
+    {% if curso %}
+      <input class="form-control" value="{{ curso['colegio_nombre'] }}" readonly>
+    {% else %}
+      <select class="form-select" name="colegio_id" required>
+        <option value="">Seleccionar colegio</option>
+        {% for colegio in colegios %}
+          <option value="{{ colegio['id'] }}" {% if colegio_default and colegio_default|int == colegio['id']|int %}selected{% endif %}>{{ colegio['nombre'] }}</option>
+        {% endfor %}
+      </select>
+    {% endif %}
+  </div>
+  <div class="col-md-4">
+    <label class="form-label">Nombre del curso</label>
+    <input class="form-control" name="nombre" value="{{ curso['nombre'] if curso else '' }}" required placeholder="Ej. 1° Medio A">
+  </div>
+  <div class="col-md-2">
+    <label class="form-label">Nivel</label>
+    <input class="form-control" name="nivel" value="{{ curso['nivel'] if curso else '' }}" placeholder="Media">
+  </div>
+  <div class="col-md-1">
+    <label class="form-label">Orden</label>
+    <input class="form-control" type="number" name="orden" value="{{ curso['orden'] if curso else 999 }}">
+  </div>
+  <div class="col-12 form-check ms-2"><input class="form-check-input" type="checkbox" name="activo" {% if not curso or curso['activo'] %}checked{% endif %}><label class="form-check-label">Curso activo</label></div>
+  <div class="col-12 d-flex gap-2"><button class="btn btn-primary">Guardar</button><a class="btn btn-outline-secondary" href="{{ url_for('cursos_list') }}">Cancelar</a></div>
+</form></div></div>
+{% endblock %}

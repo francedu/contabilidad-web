@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+{% block title %}Cursos{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h1 class="h3 mb-1">Cursos por colegio</h1>
+    <div class="text-muted">Administra cursos dinámicos sin afectar alumnos ni pagos existentes.</div>
+  </div>
+  <a class="btn btn-primary" href="{{ url_for('cursos_new', colegio_id=colegio_filtro) }}">Nuevo curso</a>
+</div>
+<form class="card card-body shadow-sm mb-3" method="get">
+  <div class="row g-2 align-items-end">
+    <div class="col-md-5">
+      <label class="form-label">Filtrar por colegio</label>
+      <select class="form-select" name="colegio_id">
+        <option value="">Todos los colegios</option>
+        {% for colegio in colegios %}
+          <option value="{{ colegio['id'] }}" {% if colegio_filtro and colegio_filtro|int == colegio['id']|int %}selected{% endif %}>{{ colegio['nombre'] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3"><button class="btn btn-outline-primary w-100">Aplicar</button></div>
+  </div>
+</form>
+<div class="card shadow-sm"><div class="card-body p-0"><div class="table-responsive">
+<table class="table table-hover mb-0 align-middle">
+  <thead><tr><th>Colegio</th><th>Curso</th><th>Nivel</th><th>Orden</th><th>Alumnos</th><th>Activo</th><th></th></tr></thead>
+  <tbody>
+    {% for curso in cursos %}
+    <tr>
+      <td>{{ curso['colegio_nombre'] }}</td>
+      <td class="fw-semibold">{{ curso['nombre'] }}</td>
+      <td>{{ curso['nivel'] or '-' }}</td>
+      <td>{{ curso['orden'] }}</td>
+      <td>{{ curso['alumnos'] or 0 }}</td>
+      <td><span class="badge {{ 'text-bg-success' if curso['activo'] else 'text-bg-secondary' }}">{{ 'Sí' if curso['activo'] else 'No' }}</span></td>
+      <td class="text-end">
+        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('cursos_edit', curso_id=curso['id']) }}">Editar</a>
+        <form method="post" action="{{ url_for('cursos_toggle', curso_id=curso['id']) }}" class="d-inline">
+          <button class="btn btn-sm btn-outline-secondary">{{ 'Desactivar' if curso['activo'] else 'Activar' }}</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" class="text-center text-muted py-4">No hay cursos configurados.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div></div></div>
+{% endblock %}

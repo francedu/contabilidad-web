@@ -64,6 +64,10 @@ PREDEFINED_COURSES = [
     '6° Básico',
     '7° Básico',
     '8° Básico',
+    '1° Medio',
+    '2° Medio',
+    '3° Medio',
+    '4° Medio',
 ]
 
 COURSE_NORMALIZATION_MAP = {
@@ -77,6 +81,10 @@ COURSE_NORMALIZATION_MAP = {
     '6° Básico': ['6', '6 basico', '6 básico', '6to', '6to basico', '6to básico', 'sexto', 'sexto basico', 'sexto básico'],
     '7° Básico': ['7', '7 basico', '7 básico', '7mo', '7mo basico', '7mo básico', 'séptimo', 'septimo', 'séptimo basico', 'séptimo básico', 'septimo basico', 'septimo básico'],
     '8° Básico': ['8', '8 basico', '8 básico', '8vo', '8vo basico', '8vo básico', 'octavo', 'octavo basico', 'octavo básico'],
+    '1° Medio': ['1 medio', '1° medio', 'primero medio', 'i medio'],
+    '2° Medio': ['2 medio', '2° medio', 'segundo medio', 'ii medio'],
+    '3° Medio': ['3 medio', '3° medio', 'tercero medio', 'iii medio'],
+    '4° Medio': ['4 medio', '4° medio', 'cuarto medio', 'iv medio'],
 }
 
 
@@ -239,6 +247,7 @@ def create_app() -> Flask:
             'selected_admin_course': admin_selected_course(),
             'available_courses': get_available_courses(),
             'predefined_courses': get_available_courses(include_dynamic=True),
+            'courses_by_school': get_courses_by_school(),
             'colegios': get_colegios(),
             'selected_colegio_id': selected_colegio_id(),
             'current_colegio_nombre': current_colegio_nombre(),
@@ -413,25 +422,65 @@ def create_app() -> Flask:
     def current_course_filter() -> str | None:
         return user_course_scope() or admin_selected_course()
 
-    def get_available_courses(include_dynamic: bool = True) -> list[str]:
-        cursos: dict[str, str] = {normalize_course(curso): curso for curso in PREDEFINED_COURSES}
-        if include_dynamic and current_user.is_authenticated:
-            db = get_db()
-            queries = [
-                "SELECT DISTINCT curso FROM alumnos WHERE curso IS NOT NULL AND trim(curso) <> ''",
-                "SELECT DISTINCT curso FROM actividades WHERE curso IS NOT NULL AND trim(curso) <> ''",
-                "SELECT DISTINCT curso FROM movimientos WHERE curso IS NOT NULL AND trim(curso) <> ''",
-                "SELECT DISTINCT curso FROM usuario_roles_curso WHERE curso IS NOT NULL AND trim(curso) <> ''",
+    def get_available_courses(include_dynamic: bool = True, colegio_id: int | None = None) -> list[str]:
+        """Cursos disponibles, preferentemente desde la tabla cursos por colegio.
+
+        Conserva compatibilidad con datos antiguos: si aún hay cursos solo como texto
+        en alumnos/movimientos/actividades/permisos, también aparecen en los selectores.
+        """
+        cursos: dict[str, str] = {}
+        db = get_db() if current_user.is_authenticated else None
+        if db is not None:
+            params: list[Any] = []
+            sql = "SELECT nombre FROM cursos WHERE activo = 1"
+            if colegio_id:
+                sql += " AND colegio_id = ?"
+                params.append(int(colegio_id))
+            sql += " ORDER BY orden, nombre"
+            try:
+                for row in db.fetchall(sql, params):
+                    valor = (row['nombre'] or '').strip()
+                    if valor:
+                        cursos.setdefault(normalize_course(valor), valor)
+            except Exception:
+                pass
+
+        # Fallback: lista base si no hay cursos configurados todavía.
+        if not cursos:
+            cursos.update({normalize_course(curso): curso for curso in PREDEFINED_COURSES})
+
+        if include_dynamic and db is not None:
+            dynamic_queries = [
+                ("SELECT DISTINCT curso FROM alumnos WHERE curso IS NOT NULL AND trim(curso) <> ''", "colegio_id"),
+                ("SELECT DISTINCT curso FROM actividades WHERE curso IS NOT NULL AND trim(curso) <> ''", "colegio_id"),
+                ("SELECT DISTINCT curso FROM movimientos WHERE curso IS NOT NULL AND trim(curso) <> ''", "colegio_id"),
+                ("SELECT DISTINCT curso FROM usuario_roles_curso WHERE curso IS NOT NULL AND trim(curso) <> ''", "colegio_id"),
             ]
-            for sql_dyn in queries:
+            for base_sql, colegio_col in dynamic_queries:
+                params = []
+                sql_dyn = base_sql
+                if colegio_id:
+                    sql_dyn += f" AND {colegio_col} = ?"
+                    params.append(int(colegio_id))
                 try:
-                    for row in db.fetchall(sql_dyn):
+                    for row in db.fetchall(sql_dyn, params):
                         valor = (row['curso'] or '').strip()
                         if valor:
                             cursos.setdefault(normalize_course(valor), valor)
                 except Exception:
                     continue
         return sorted(cursos.values(), key=lambda x: normalize_course(x))
+
+    def get_courses_by_school() -> dict[int, list[str]]:
+        db = get_db()
+        resultado: dict[int, list[str]] = {}
+        try:
+            for c in get_colegios():
+                cid = int(c['id'])
+                resultado[cid] = get_available_courses(colegio_id=cid)
+        except Exception:
+            pass
+        return resultado
 
     def append_scope_filter(sql: str, params: list[Any], curso_expr: str, colegio_expr: str) -> tuple[str, list[Any]]:
         if current_user.is_authenticated and current_user.is_admin_global():
@@ -1050,6 +1099,106 @@ def create_app() -> Flask:
                 return redirect(url_for('colegios_list'))
         return render_template('colegios_form.html', colegio=colegio)
 
+
+    @app.route('/cursos')
+    @role_required('admin')
+    def cursos_list():
+        db = get_db()
+        colegio_raw = request.args.get('colegio_id', '').strip()
+        sql = '''
+            SELECT cu.*, c.nombre AS colegio_nombre,
+                   COALESCE(al.alumnos, 0) AS alumnos
+            FROM cursos cu
+            INNER JOIN colegios c ON c.id = cu.colegio_id
+            LEFT JOIN (
+                SELECT colegio_id, curso, COUNT(*) AS alumnos
+                FROM alumnos
+                GROUP BY colegio_id, curso
+            ) al ON al.colegio_id = cu.colegio_id AND lower(trim(al.curso)) = lower(trim(cu.nombre))
+            WHERE 1=1
+        '''
+        params: list[Any] = []
+        if colegio_raw.isdigit():
+            sql += ' AND cu.colegio_id = ?'
+            params.append(int(colegio_raw))
+        sql += ' ORDER BY c.nombre, cu.orden, cu.nombre'
+        cursos_rows = db.fetchall(sql, params)
+        return render_template('cursos_list.html', cursos=cursos_rows, colegio_filtro=colegio_raw)
+
+    @app.route('/cursos/nuevo', methods=['GET', 'POST'])
+    @role_required('admin')
+    def cursos_new():
+        db = get_db()
+        colegio_default = request.args.get('colegio_id', '').strip()
+        if request.method == 'POST':
+            colegio_raw = request.form.get('colegio_id', '').strip()
+            nombre = standardize_course_name(request.form.get('nombre', '').strip()) or request.form.get('nombre', '').strip()
+            nivel = request.form.get('nivel', '').strip() or None
+            orden = int(request.form.get('orden') or 999)
+            activo = 1 if request.form.get('activo') == 'on' else 0
+            if not colegio_raw.isdigit():
+                flash('Debes seleccionar colegio.', 'danger')
+            elif not nombre:
+                flash('El nombre del curso es obligatorio.', 'danger')
+            elif db.fetchone('SELECT 1 FROM cursos WHERE colegio_id=? AND lower(trim(nombre))=lower(trim(?))', (int(colegio_raw), nombre)):
+                flash('Ese curso ya existe para ese colegio.', 'warning')
+            else:
+                db.execute('INSERT INTO cursos (colegio_id, nombre, nivel, orden, activo) VALUES (?, ?, ?, ?, ?)',
+                           (int(colegio_raw), nombre, nivel, orden, activo))
+                db.commit()
+                log_audit('crear', 'curso', db.fetchone('SELECT MAX(id) AS id FROM cursos')['id'], nombre, int(colegio_raw), nombre)
+                flash('Curso creado.', 'success')
+                return redirect(url_for('cursos_list', colegio_id=colegio_raw))
+        return render_template('cursos_form.html', curso=None, colegio_default=colegio_default)
+
+    @app.route('/cursos/<int:curso_id>/editar', methods=['GET', 'POST'])
+    @role_required('admin')
+    def cursos_edit(curso_id: int):
+        db = get_db()
+        curso = db.fetchone('SELECT cu.*, c.nombre AS colegio_nombre FROM cursos cu INNER JOIN colegios c ON c.id=cu.colegio_id WHERE cu.id=?', (curso_id,))
+        if not curso:
+            flash('Curso no encontrado.', 'danger')
+            return redirect(url_for('cursos_list'))
+        if request.method == 'POST':
+            nombre = standardize_course_name(request.form.get('nombre', '').strip()) or request.form.get('nombre', '').strip()
+            nivel = request.form.get('nivel', '').strip() or None
+            orden = int(request.form.get('orden') or 999)
+            activo = 1 if request.form.get('activo') == 'on' else 0
+            if not nombre:
+                flash('El nombre del curso es obligatorio.', 'danger')
+            elif db.fetchone('SELECT 1 FROM cursos WHERE colegio_id=? AND lower(trim(nombre))=lower(trim(?)) AND id<>?', (curso['colegio_id'], nombre, curso_id)):
+                flash('Ese curso ya existe para ese colegio.', 'warning')
+            else:
+                nombre_anterior = curso['nombre']
+                db.execute('UPDATE cursos SET nombre=?, nivel=?, orden=?, activo=? WHERE id=?', (nombre, nivel, orden, activo, curso_id))
+                # Mantener coherencia si se renombra: actualiza referencias de ese colegio al mismo curso.
+                if normalize_course(nombre_anterior) != normalize_course(nombre):
+                    for tabla in ['alumnos', 'actividades', 'movimientos', 'usuario_roles_curso', 'cierres_mensuales', 'cuotas_mensuales']:
+                        try:
+                            db.execute(f"UPDATE {tabla} SET curso=? WHERE colegio_id=? AND lower(trim(curso))=lower(trim(?))", (nombre, curso['colegio_id'], nombre_anterior))
+                        except Exception:
+                            db.rollback()
+                db.commit()
+                log_audit('editar', 'curso', curso_id, f"{nombre_anterior} -> {nombre}", int(curso['colegio_id']), nombre)
+                flash('Curso actualizado.', 'success')
+                return redirect(url_for('cursos_list', colegio_id=curso['colegio_id']))
+        return render_template('cursos_form.html', curso=curso, colegio_default=str(curso['colegio_id']))
+
+    @app.post('/cursos/<int:curso_id>/desactivar')
+    @role_required('admin')
+    def cursos_toggle(curso_id: int):
+        db = get_db()
+        curso = db.fetchone('SELECT * FROM cursos WHERE id=?', (curso_id,))
+        if not curso:
+            flash('Curso no encontrado.', 'danger')
+            return redirect(url_for('cursos_list'))
+        nuevo_estado = 0 if int(curso['activo'] or 0) else 1
+        db.execute('UPDATE cursos SET activo=? WHERE id=?', (nuevo_estado, curso_id))
+        db.commit()
+        log_audit('activar' if nuevo_estado else 'desactivar', 'curso', curso_id, curso['nombre'], int(curso['colegio_id']), curso['nombre'])
+        flash('Curso actualizado.', 'success')
+        return redirect(url_for('cursos_list', colegio_id=curso['colegio_id']))
+
     @app.get('/backups/<path:nombre>')
     @role_required('admin')
     def backups_download(nombre: str):
@@ -1336,6 +1485,7 @@ def create_app() -> Flask:
         if request.method == 'POST':
             nombre = request.form.get('nombre', '').strip()
             username = request.form.get('username', '').strip().lower()
+            email = request.form.get('email', '').strip().lower()
             password = request.form.get('password', '')
             role = request.form.get('role', 'solo_lectura')
             activo = 1 if request.form.get('activo') == 'on' else 0
@@ -2983,6 +3133,16 @@ def init_db(db: DBAdapter) -> None:
             activo INTEGER NOT NULL DEFAULT 1
         );
 
+        CREATE TABLE IF NOT EXISTS cursos (
+            id BIGSERIAL PRIMARY KEY,
+            colegio_id BIGINT NOT NULL,
+            nombre TEXT NOT NULL,
+            nivel TEXT,
+            orden INTEGER NOT NULL DEFAULT 0,
+            activo INTEGER NOT NULL DEFAULT 1,
+            UNIQUE(colegio_id, nombre)
+        );
+
         CREATE TABLE IF NOT EXISTS actividades (
             id BIGSERIAL PRIMARY KEY,
             nombre TEXT NOT NULL,
@@ -3116,6 +3276,16 @@ def init_db(db: DBAdapter) -> None:
             logo_url TEXT,
             color_marca TEXT,
             activo INTEGER NOT NULL DEFAULT 1
+        );
+
+        CREATE TABLE IF NOT EXISTS cursos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            colegio_id INTEGER NOT NULL,
+            nombre TEXT NOT NULL,
+            nivel TEXT,
+            orden INTEGER NOT NULL DEFAULT 0,
+            activo INTEGER NOT NULL DEFAULT 1,
+            UNIQUE(colegio_id, nombre)
         );
 
         CREATE TABLE IF NOT EXISTS actividades (
@@ -3371,6 +3541,7 @@ def init_db(db: DBAdapter) -> None:
     # sin colegio_id, crear el índice antes del ALTER TABLE provoca: no such column: colegio_id.
     index_statements = [
         'CREATE INDEX IF NOT EXISTS idx_movimientos_fecha ON movimientos(fecha)',
+        'CREATE INDEX IF NOT EXISTS idx_cursos_colegio_nombre ON cursos(colegio_id, nombre)',
         'CREATE INDEX IF NOT EXISTS idx_movimientos_colegio_curso ON movimientos(colegio_id, curso)',
         'CREATE INDEX IF NOT EXISTS idx_alumnos_colegio_curso ON alumnos(colegio_id, curso)',
         'CREATE INDEX IF NOT EXISTS idx_actividades_colegio_curso ON actividades(colegio_id, curso)',
@@ -3425,6 +3596,43 @@ def init_db(db: DBAdapter) -> None:
         except Exception:
             db.rollback()
 
+
+
+    # Sembrar cursos dinámicos por colegio sin borrar cursos existentes.
+    # Cada colegio recibe la lista base; además se copian cursos históricos detectados.
+    try:
+        colegios_seed = db.fetchall('SELECT id FROM colegios')
+        base_courses = list(PREDEFINED_COURSES)
+        for colegio in colegios_seed:
+            cid = int(colegio['id'])
+            for idx_curso, nombre_curso in enumerate(base_courses, start=1):
+                try:
+                    db.execute('INSERT INTO cursos (colegio_id, nombre, nivel, orden, activo) VALUES (?, ?, ?, ?, 1)',
+                               (cid, nombre_curso, 'base', idx_curso))
+                    db.commit()
+                except Exception:
+                    db.rollback()
+        historic_queries = [
+            "SELECT DISTINCT COALESCE(colegio_id, 1) AS colegio_id, curso FROM alumnos WHERE curso IS NOT NULL AND trim(curso) <> \'\'",
+            "SELECT DISTINCT COALESCE(colegio_id, 1) AS colegio_id, curso FROM actividades WHERE curso IS NOT NULL AND trim(curso) <> \'\'",
+            "SELECT DISTINCT COALESCE(colegio_id, 1) AS colegio_id, curso FROM movimientos WHERE curso IS NOT NULL AND trim(curso) <> \'\'",
+            "SELECT DISTINCT COALESCE(colegio_id, 1) AS colegio_id, curso FROM usuario_roles_curso WHERE curso IS NOT NULL AND trim(curso) <> \'\'",
+        ]
+        for hsql in historic_queries:
+            for row in db.fetchall(hsql):
+                cid = int(row['colegio_id'] or 1)
+                nombre = standardize_course_name(row['curso']) or (row['curso'] or '').strip()
+                if not nombre:
+                    continue
+                try:
+                    db.execute('INSERT INTO cursos (colegio_id, nombre, nivel, orden, activo) VALUES (?, ?, ?, ?, 1)',
+                               (cid, nombre, 'historico', 999))
+                    db.commit()
+                except Exception:
+                    db.rollback()
+        db.commit()
+    except Exception:
+        db.rollback()
 
     try:
         pagos_sin_folio = db.fetchall("SELECT p.id, COALESCE(a.colegio_id, 1) AS colegio_id FROM pagos_alumnos p INNER JOIN alumnos a ON a.id = p.alumno_id WHERE p.folio IS NULL OR p.folio = 0 ORDER BY COALESCE(a.colegio_id, 1), p.fecha, p.id")

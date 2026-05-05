@@ -31,6 +31,7 @@
           
           <a class="nav-link {% if request.endpoint == 'saas_dashboard' %}active{% endif %}" href="{{ url_for('saas_dashboard') }}">Plataforma</a>
           <a class="nav-link {% if request.endpoint and request.endpoint.startswith('colegios') %}active{% endif %}" href="{{ url_for('colegios_list') }}">Colegios</a>
+          <a class="nav-link {% if request.endpoint and request.endpoint.startswith('cursos') %}active{% endif %}" href="{{ url_for('cursos_list') }}">Cursos</a>
           <a class="nav-link {% if request.endpoint and request.endpoint.startswith('usuarios') %}active{% endif %}" href="{{ url_for('usuarios_list') }}">Usuarios</a>
           <a class="nav-link {% if request.endpoint and request.endpoint.startswith('backups') %}active{% endif %}" href="{{ url_for('backups_list') }}">Respaldos</a>
           <a class="nav-link {% if request.endpoint and request.endpoint.startswith('auditoria') %}active{% endif %}" href="{{ url_for('auditoria_list') }}">Auditoría</a>

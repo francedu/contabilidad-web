@@ -28,7 +28,7 @@
           {% for permiso in lista_permisos %}
           <tr>
             <td>
-              <select class="form-select form-select-sm" name="perm_colegio_id">
+              <select class="form-select form-select-sm" name="perm_colegio_id" data-course-school>
                 <option value="">Seleccionar colegio</option>
                 {% for colegio in colegios %}
                   <option value="{{ colegio['id'] }}" {% if permiso and permiso['colegio_id']|int == colegio['id']|int %}selected{% endif %}>{{ colegio['nombre'] }}</option>
@@ -37,7 +37,7 @@
             </td>
             <td>
               {% set selected_course = permiso['curso'] if permiso else '' %}
-              <select class="form-select form-select-sm" name="perm_curso">
+              <select class="form-select form-select-sm" name="perm_curso" data-course-select data-selected-course="{{ selected_course }}">
                 <option value="">Seleccionar curso</option>
                 {% for curso in predefined_courses %}<option value="{{ curso }}" {% if selected_course == curso %}selected{% endif %}>{{ curso }}</option>{% endfor %}
                 {% if selected_course and selected_course not in predefined_courses %}<option value="{{ selected_course }}" selected>{{ selected_course }}</option>{% endif %}
@@ -65,13 +65,38 @@
 <script>
 const roleSelect = document.getElementById('roleSelect');
 const box = document.getElementById('permisosCursoBox');
+const coursesBySchool = {{ courses_by_school|tojson }};
+const defaultCourses = {{ predefined_courses|tojson }};
 function togglePermisos(){ box.style.display = ['admin','admin_global'].includes(roleSelect.value) ? 'none' : ''; }
+function fillCourseSelect(select, schoolId, keepSelected=true) {
+  if (!select) return;
+  const selected = keepSelected ? (select.dataset.selectedCourse || select.value || '') : '';
+  const cursos = (schoolId && coursesBySchool[String(schoolId)]) ? coursesBySchool[String(schoolId)] : defaultCourses;
+  select.innerHTML = '<option value="">Seleccionar curso</option>';
+  cursos.forEach((curso) => {
+    const opt = document.createElement('option'); opt.value = curso; opt.textContent = curso;
+    if (curso === selected) opt.selected = true;
+    select.appendChild(opt);
+  });
+  if (selected && !Array.from(select.options).some(o => o.value === selected)) {
+    const opt = document.createElement('option'); opt.value = selected; opt.textContent = selected; opt.selected = true; select.appendChild(opt);
+  }
+}
+function wireCourseRow(row) {
+  const school = row.querySelector('[data-course-school]');
+  const course = row.querySelector('[data-course-select]');
+  if (!school || !course) return;
+  fillCourseSelect(course, school.value, true);
+  school.addEventListener('change', () => { course.dataset.selectedCourse = ''; fillCourseSelect(course, school.value, false); });
+}
 roleSelect.addEventListener('change', togglePermisos); togglePermisos();
+document.querySelectorAll('#permisosTable tbody tr').forEach(wireCourseRow);
 document.getElementById('addPermiso').addEventListener('click', () => {
   const tbody = document.querySelector('#permisosTable tbody');
   const clone = tbody.querySelector('tr').cloneNode(true);
-  clone.querySelectorAll('select').forEach(s => s.selectedIndex = 0);
+  clone.querySelectorAll('select').forEach(s => { s.selectedIndex = 0; s.dataset.selectedCourse = ''; });
   tbody.appendChild(clone);
+  wireCourseRow(clone);
 });
 </script>
 {% endblock %}
