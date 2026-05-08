@@ -305,7 +305,6 @@ def create_app() -> Flask:
             'course_letters': COURSE_LETTERS,
             'courses_by_school': get_courses_by_school(),
             'colegios': get_colegios(),
-            'visible_colegios': get_visible_colegios(),
             'selected_colegio_id': selected_colegio_id(),
             'current_colegio_id': effective_colegio_id(),
             'current_colegio_nombre': current_colegio_nombre(),
@@ -425,33 +424,6 @@ def create_app() -> Flask:
             return redirect(request.referrer or url_for('dashboard'))
         return None
 
-
-    def get_visible_colegios() -> list[Any]:
-        if not current_user.is_authenticated:
-            return []
-        if current_user.is_admin_global():
-            return get_colegios()
-        permisos = user_course_permissions()
-        vistos = set()
-        colegios_visibles = []
-        for p in permisos:
-            try:
-                cid = int(p['colegio_id'])
-            except Exception:
-                continue
-            if cid in vistos:
-                continue
-            vistos.add(cid)
-            colegios_visibles.append({'id': cid, 'nombre': p['colegio_nombre']})
-        if colegios_visibles:
-            return colegios_visibles
-        cid = effective_colegio_id()
-        if cid:
-            db = get_db()
-            row = db.fetchone('SELECT id, nombre FROM colegios WHERE id = ?', (cid,))
-            return [row] if row else []
-        return []
-
     def get_colegios() -> list[Any]:
         db = get_db()
         try:
@@ -541,12 +513,12 @@ def create_app() -> Flask:
         allowed = user_allowed_colegio_ids()
         if raw_selected and raw_selected in allowed:
             return raw_selected
-        return allowed[0] if len(allowed) == 1 else None
+        return allowed[0] if allowed else None
 
     def user_course_scope() -> str | None:
         if not current_user.is_authenticated or current_user.is_admin_global():
             return None
-        curso = request.args.get('curso', '').strip()
+        curso = request.args.get('curso', '').strip() or (getattr(current_user, 'curso', None) or '').strip()
         return curso or None
 
     def admin_selected_course() -> str | None:
@@ -563,23 +535,9 @@ def create_app() -> Flask:
 
         Conserva compatibilidad con datos antiguos: si aún hay cursos solo como texto
         en alumnos/movimientos/actividades/permisos, también aparecen en los selectores.
-        Para usuarios no admin con permisos por curso, muestra solo sus cursos asignados.
         """
         cursos: dict[str, str] = {}
         db = get_db() if current_user.is_authenticated else None
-        if current_user.is_authenticated and not current_user.is_admin_global():
-            permisos = user_course_permissions()
-            if permisos:
-                for permiso in permisos:
-                    try:
-                        if colegio_id and int(permiso['colegio_id']) != int(colegio_id):
-                            continue
-                        valor = (permiso['curso'] or '').strip()
-                        if valor:
-                            cursos.setdefault(normalize_course(valor), valor)
-                    except Exception:
-                        continue
-                return sorted(cursos.values(), key=lambda x: normalize_course(x))
         if db is not None:
             params: list[Any] = []
             sql = "SELECT nombre FROM cursos WHERE activo = 1"
@@ -719,26 +677,14 @@ def create_app() -> Flask:
         return float(row['monto']) if row else 0.0
 
     def resolve_colegio_for_course(curso: str | None) -> int | None:
-        raw = (request.form.get('colegio_id') or request.args.get('colegio_id') or '').strip()
-        selected = int(raw) if raw.isdigit() else None
         if current_user.is_authenticated and current_user.is_admin_global():
-            return selected or effective_colegio_id()
+            raw = (request.form.get('colegio_id') or request.args.get('colegio_id') or '').strip()
+            return int(raw) if raw.isdigit() else effective_colegio_id()
         permisos = user_course_permissions()
-        if permisos:
-            # Si el usuario seleccionó colegio, debe coincidir con uno de sus permisos para ese curso.
-            if selected:
-                for p in permisos:
-                    if int(p['colegio_id']) == selected and normalize_course(p['curso']) == normalize_course(curso):
-                        return selected
-                return None
-            # Sin colegio seleccionado, solo resolvemos automáticamente si el curso existe una vez.
-            candidatos = [int(p['colegio_id']) for p in permisos if normalize_course(p['curso']) == normalize_course(curso)]
-            candidatos_unicos = []
-            for cid in candidatos:
-                if cid not in candidatos_unicos:
-                    candidatos_unicos.append(cid)
-            return candidatos_unicos[0] if len(candidatos_unicos) == 1 else None
-        return selected or effective_colegio_id()
+        for p in permisos:
+            if normalize_course(p['curso']) == normalize_course(curso):
+                return int(p['colegio_id'])
+        return effective_colegio_id()
 
     def fetch_pago_permitido(db: DBAdapter, pago_id: int):
         pago = db.fetchone(
@@ -928,7 +874,7 @@ def create_app() -> Flask:
         reporte_sql += ' GROUP BY substr(m.fecha, 1, 7) ORDER BY mes ASC'
         reporte = db.fetchall(reporte_sql, reporte_params)
         mes = request.args.get('mes') or datetime.today().strftime('%Y-%m')
-        alertas = obtener_alertas_morosidad(db, mes, current_course_filter(), selected_colegio_id() if current_user.is_admin_global() else effective_colegio_id())
+        alertas = obtener_alertas_morosidad(db, mes, current_course_filter(), selected_colegio_id() if current_user.is_admin_global() else getattr(current_user, 'colegio_id', None))
         ultimos_sql = """
             SELECT m.id, m.fecha, m.tipo, m.concepto, m.monto, COALESCE(a.nombre, '-') AS actividad
             FROM movimientos m
@@ -959,7 +905,7 @@ def create_app() -> Flask:
         alumnos_params: list[Any] = []
         alumnos_sql, alumnos_params = course_filter_sql(alumnos_sql, alumnos_params, 'a')
         alumnos_activos = db.fetchone(alumnos_sql, alumnos_params)
-        cuotas = resumen_cuotas_por_alumno(db, mes, current_course_filter(), selected_colegio_id() if current_user.is_admin_global() else effective_colegio_id())
+        cuotas = resumen_cuotas_por_alumno(db, mes, current_course_filter(), selected_colegio_id() if current_user.is_admin_global() else getattr(current_user, 'colegio_id', None))
         total_esperado = sum(float(f['cuota_mensual']) for f in cuotas if f['activo'])
         total_pagado = sum(float(f['pagado']) for f in cuotas if f['activo'])
         deuda_total = sum(max(float(f['cuota_mensual']) - float(f['pagado']), 0) for f in cuotas if f['activo'])
@@ -1115,7 +1061,7 @@ def create_app() -> Flask:
         tipo = request.args.get('tipo', 'Todos')
         mes = request.args.get('mes', '')
         q = request.args.get('q', '').strip()
-        movimientos = obtener_movimientos_filtrados(db, tipo=tipo, mes=mes, q=q, curso_scope=current_course_filter(), colegio_scope=selected_colegio_id() if current_user.is_admin_global() else effective_colegio_id())
+        movimientos = obtener_movimientos_filtrados(db, tipo=tipo, mes=mes, q=q, curso_scope=current_course_filter(), colegio_scope=selected_colegio_id() if current_user.is_admin_global() else getattr(current_user, 'colegio_id', None))
         ts = datetime.now().strftime('%Y%m%d_%H%M%S')
         nombre = f'movimientos_{ts}'
         if fmt == 'csv':
@@ -1496,7 +1442,7 @@ def create_app() -> Flask:
     def cierres_list():
         db = get_db()
         mes = request.args.get('mes') or datetime.today().strftime('%Y-%m')
-        colegio_scope = selected_colegio_id() if current_user.is_admin_global() else effective_colegio_id()
+        colegio_scope = selected_colegio_id() if current_user.is_admin_global() else getattr(current_user, 'colegio_id', None)
         curso_scope = current_course_filter()
         sql = """
             SELECT cm.*, c.nombre AS colegio_nombre
@@ -1527,13 +1473,16 @@ def create_app() -> Flask:
         db = get_db()
         mes = request.form.get('mes') or datetime.today().strftime('%Y-%m')
         curso = (request.form.get('curso') or current_course_filter() or '').strip()
-        colegio_raw = request.form.get('colegio_id') or (selected_colegio_id() if current_user.is_admin_global() else effective_colegio_id())
+        colegio_raw = request.form.get('colegio_id') or (selected_colegio_id() if current_user.is_admin_global() else getattr(current_user, 'colegio_id', None))
         try:
             colegio_id = int(colegio_raw)
         except Exception:
             colegio_id = 0
         if not colegio_id or not curso:
             flash('Debes seleccionar colegio y curso para cerrar el mes.', 'danger')
+            return redirect(url_for('cierres_list', mes=mes))
+        if not current_user.is_admin_global() and int(getattr(current_user, 'colegio_id', 0) or 0) != colegio_id:
+            flash('No tienes permiso para cerrar este colegio.', 'danger')
             return redirect(url_for('cierres_list', mes=mes))
         if not ensure_course_access(curso, colegio_id):
             flash('No tienes permiso para cerrar este curso.', 'danger')
@@ -2245,7 +2194,7 @@ def create_app() -> Flask:
         fecha_hasta = request.args.get('fecha_hasta', '').strip()
         actividad_id = request.args.get('actividad_id', '').strip()
         alumno_id = request.args.get('alumno_id', '').strip()
-        movimientos = obtener_movimientos_filtrados(db, tipo=tipo, mes=mes, q=q, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, actividad_id=actividad_id, alumno_id=alumno_id, curso_scope=current_course_filter(), colegio_scope=selected_colegio_id() if current_user.is_admin_global() else effective_colegio_id())
+        movimientos = obtener_movimientos_filtrados(db, tipo=tipo, mes=mes, q=q, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, actividad_id=actividad_id, alumno_id=alumno_id, curso_scope=current_course_filter(), colegio_scope=selected_colegio_id() if current_user.is_admin_global() else getattr(current_user, 'colegio_id', None))
         actividades_sql = 'SELECT id, nombre, fecha, curso FROM actividades a WHERE 1=1'
         actividades_params: list[Any] = []
         actividades_sql, actividades_params = course_filter_sql(actividades_sql, actividades_params, 'a')
@@ -2437,7 +2386,7 @@ def create_app() -> Flask:
         actividades_sql, actividades_params = course_filter_sql(actividades_sql, actividades_params, 'a')
         actividades_sql += ' GROUP BY a.id, a.nombre, a.fecha, a.curso, a.descripcion ORDER BY a.fecha DESC, a.nombre'
         actividades = db.fetchall(actividades_sql, actividades_params)
-        deudas = resumen_cuotas_por_alumno(db, mes, current_course_filter(), selected_colegio_id() if current_user.is_admin_global() else effective_colegio_id())
+        deudas = resumen_cuotas_por_alumno(db, mes, current_course_filter(), selected_colegio_id() if current_user.is_admin_global() else getattr(current_user, 'colegio_id', None))
         total_deuda = sum(max(float(f['cuota_mensual']) - float(f['pagado']), 0) for f in deudas if f['activo'])
         return render_template('actividades_report.html', actividades=actividades, mes=mes, deudas=deudas, total_deuda=total_deuda)
 
@@ -2555,7 +2504,7 @@ def create_app() -> Flask:
     def cuotas_configuracion():
         db = get_db()
         mes = request.values.get('mes', datetime.now().strftime('%Y-%m')).strip()
-        colegio_id = selected_colegio_id() if current_user.is_admin_global() else effective_colegio_id()
+        colegio_id = selected_colegio_id() or (int(getattr(current_user, 'colegio_id', 0) or 0) if not current_user.is_admin_global() else None)
         curso = request.values.get('curso', '').strip() or current_course_filter()
         if request.method == 'POST':
             raw_colegio = request.form.get('colegio_id', '').strip()
@@ -2717,7 +2666,7 @@ def create_app() -> Flask:
             filename = f'reporte_cuotas_{filtro_reporte}_{mes}.pdf'
             return send_file(pdf_buffer, mimetype='application/pdf', as_attachment=True, download_name=filename)
 
-        filas = resumen_cuotas_por_alumno(db, mes, current_course_filter(), selected_colegio_id() if current_user.is_admin_global() else effective_colegio_id())
+        filas = resumen_cuotas_por_alumno(db, mes, current_course_filter(), selected_colegio_id() if current_user.is_admin_global() else getattr(current_user, 'colegio_id', None))
         if filtro_reporte == 'deuda':
             filas = [
                 fila for fila in filas
@@ -2727,7 +2676,7 @@ def create_app() -> Flask:
         total_esperado = sum(float(x['cuota_mensual']) for x in filas if x['activo'])
         total_pagado = sum(float(x['pagado']) for x in filas)
         total_debe = sum(max(float(x['cuota_mensual']) - float(x['pagado']), 0) for x in filas if x['activo'])
-        alertas = obtener_alertas_morosidad(db, mes, current_course_filter(), selected_colegio_id() if current_user.is_admin_global() else effective_colegio_id())
+        alertas = obtener_alertas_morosidad(db, mes, current_course_filter(), selected_colegio_id() if current_user.is_admin_global() else getattr(current_user, 'colegio_id', None))
         if filtro_reporte == 'deuda':
             alertas = [alerta for alerta in alertas if alerta['debe'] > 0]
         return render_template(
@@ -2754,7 +2703,7 @@ def create_app() -> Flask:
             db,
             mes,
             current_course_filter(),
-            selected_colegio_id() if current_user.is_admin_global() else effective_colegio_id(),
+            selected_colegio_id() if current_user.is_admin_global() else getattr(current_user, 'colegio_id', None),
         )
         filas = [
             fila for fila in filas
@@ -2767,7 +2716,7 @@ def create_app() -> Flask:
             db,
             mes,
             current_course_filter(),
-            selected_colegio_id() if current_user.is_admin_global() else effective_colegio_id(),
+            selected_colegio_id() if current_user.is_admin_global() else getattr(current_user, 'colegio_id', None),
         )
         alertas = [alerta for alerta in alertas if alerta['debe'] > 0]
         return render_template(
@@ -2789,7 +2738,7 @@ def create_app() -> Flask:
         db = get_db()
         mes = request.args.get('mes') or datetime.today().strftime('%Y-%m')
         filtro_reporte = request.args.get('filtro_reporte', 'deuda').strip().lower()
-        filas = resumen_cuotas_por_alumno(db, mes, current_course_filter(), selected_colegio_id() if current_user.is_admin_global() else effective_colegio_id())
+        filas = resumen_cuotas_por_alumno(db, mes, current_course_filter(), selected_colegio_id() if current_user.is_admin_global() else getattr(current_user, 'colegio_id', None))
         if filtro_reporte == 'deuda':
             filas = [f for f in filas if f['activo'] and max(float(f['cuota_mensual']) - float(f['pagado']), 0) > 0]
         wb = Workbook()
@@ -2916,72 +2865,6 @@ def create_app() -> Flask:
     return app
 
 
-
-
-def aplicar_scope_usuario_no_admin(db: DBAdapter, sql: str, params: list[Any], colegio_expr: str, curso_expr: str) -> tuple[str, list[Any]]:
-    """Aplica aislamiento multi-colegio/curso para usuarios no admin.
-
-    Si el usuario tiene varios permisos en usuario_roles_curso, sin filtro de colegio/curso
-    se muestran todos sus cursos asignados. Si selecciona colegio_id o curso en la URL,
-    se restringe a esa selección siempre que esté dentro de sus permisos.
-    """
-    try:
-        if not current_user.is_authenticated or current_user.is_admin_global():
-            return sql, params
-    except Exception:
-        return sql + ' AND 1=0', params
-
-    try:
-        selected_cid_raw = (request.args.get('colegio_id') or '').strip()
-        selected_cid = int(selected_cid_raw) if selected_cid_raw else None
-    except Exception:
-        selected_cid = None
-    selected_curso = (request.args.get('curso') or '').strip()
-
-    permisos = []
-    try:
-        permisos = db.fetchall('SELECT colegio_id, curso FROM usuario_roles_curso WHERE usuario_id = ?', (int(current_user.id),))
-    except Exception:
-        permisos = []
-
-    condiciones: list[str] = []
-    if permisos:
-        for permiso in permisos:
-            try:
-                cid = int(permiso['colegio_id'])
-                curso = (permiso['curso'] or '').strip()
-            except Exception:
-                continue
-            if selected_cid and cid != selected_cid:
-                continue
-            if selected_curso and normalize_course_value(curso) != normalize_course_value(selected_curso):
-                continue
-            condiciones.append(f"({colegio_expr} = ? AND lower(trim(COALESCE({curso_expr}, ''))) = lower(trim(?)))")
-            params.extend([cid, curso])
-        if not condiciones:
-            sql += ' AND 1=0'
-        else:
-            sql += ' AND (' + ' OR '.join(condiciones) + ')'
-        return sql, params
-
-    # Compatibilidad usuarios antiguos sin tabla de permisos.
-    try:
-        cid = int(getattr(current_user, 'colegio_id', 0) or 0)
-    except Exception:
-        cid = 0
-    curso_antiguo = (getattr(current_user, 'curso', '') or '').strip()
-    if not cid:
-        return sql + ' AND 1=0', params
-    if selected_cid and selected_cid != cid:
-        return sql + ' AND 1=0', params
-    sql += f' AND {colegio_expr} = ?'
-    params.append(cid)
-    curso_final = selected_curso or curso_antiguo
-    if curso_final:
-        sql += f" AND lower(trim(COALESCE({curso_expr}, ''))) = lower(trim(?))"
-        params.append(curso_final)
-    return sql, params
-
 def is_postgres_url(url: str) -> bool:
     return url.startswith('postgresql://') or url.startswith('postgres://')
 
@@ -3019,15 +2902,12 @@ def obtener_movimientos_filtrados(db: DBAdapter, tipo: str = 'Todos', mes: str =
     if alumno_id:
         sql += ' AND m.alumno_id = ?'
         params.append(int(alumno_id))
-    if current_user.is_authenticated and not current_user.is_admin_global():
-        sql, params = aplicar_scope_usuario_no_admin(db, sql, params, "COALESCE(m.colegio_id, a.colegio_id, al.colegio_id, 1)", "COALESCE(m.curso, a.curso, al.curso, '')")
-    else:
-        if colegio_scope:
-            sql += " AND COALESCE(m.colegio_id, a.colegio_id, al.colegio_id, 1) = ?"
-            params.append(int(colegio_scope))
-        if curso_scope:
-            sql += " AND lower(trim(COALESCE(m.curso, a.curso, al.curso, ''))) = lower(trim(?))"
-            params.append(curso_scope)
+    if colegio_scope:
+        sql += " AND COALESCE(m.colegio_id, a.colegio_id, al.colegio_id, 1) = ?"
+        params.append(int(colegio_scope))
+    if curso_scope:
+        sql += " AND lower(trim(COALESCE(m.curso, a.curso, al.curso, ''))) = lower(trim(?))"
+        params.append(curso_scope)
     if q:
         like = sql_like_ci(q)
         sql += " AND (LOWER(COALESCE(m.concepto, '')) LIKE ? OR LOWER(COALESCE(m.observacion, '')) LIKE ? OR LOWER(COALESCE(m.fecha, '')) LIKE ? OR LOWER(COALESCE(m.origen, '')) LIKE ? OR LOWER(COALESCE(a.nombre, '')) LIKE ? OR LOWER(COALESCE(al.nombre, '')) LIKE ? OR LOWER(COALESCE(al.curso, '')) LIKE ?)"
@@ -3253,15 +3133,12 @@ def resumen_cuotas_por_alumno(db: DBAdapter, mes: str, curso_scope: str | None =
         WHERE 1=1
     """
     params: list[Any] = [mes]
-    if current_user.is_authenticated and not current_user.is_admin_global():
-        sql, params = aplicar_scope_usuario_no_admin(db, sql, params, "COALESCE(a.colegio_id, 1)", "COALESCE(a.curso, '')")
-    else:
-        if colegio_scope:
-            sql += " AND COALESCE(a.colegio_id, 1) = ?"
-            params.append(colegio_scope)
-        if curso_scope:
-            sql += " AND lower(trim(COALESCE(a.curso, ''))) = lower(trim(?))"
-            params.append(curso_scope)
+    if colegio_scope:
+        sql += " AND COALESCE(a.colegio_id, 1) = ?"
+        params.append(colegio_scope)
+    if curso_scope:
+        sql += " AND lower(trim(COALESCE(a.curso, ''))) = lower(trim(?))"
+        params.append(curso_scope)
     sql += ' GROUP BY a.id, a.nombre, a.curso, a.colegio_id, c.nombre, a.cuota_mensual, a.activo ORDER BY colegio_nombre, a.curso, a.nombre'
     return db.fetchall(sql, params)
 
