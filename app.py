@@ -1888,17 +1888,34 @@ def create_app() -> Flask:
             """,
             (mes_actual, mes_actual, alumno_id),
         )
-        resumen_aportes = db.fetchone(
+        # Resumen total del alumno: cuotas mensuales + aportes reales de actividad.
+        # Importante: esta tarjeta NO debe usar solo movimientos, porque las cuotas viven
+        # en pagos_alumnos y los aportes de actividad viven en movimientos.
+        resumen_totales_alumno = db.fetchone(
             """
-            SELECT COALESCE(SUM(CASE WHEN m.tipo = 'ingreso' THEN m.monto ELSE 0 END), 0) AS ingresos_actividad,
-                   COALESCE(SUM(CASE WHEN m.tipo = 'gasto' THEN m.monto ELSE 0 END), 0) AS gastos_asociados,
-                   COUNT(*) AS movimientos_asociados
-            FROM movimientos m
-            WHERE m.alumno_id = ?
-              AND m.origen = 'actividad_alumno'
-              AND m.actividad_id IS NOT NULL
+            SELECT
+                (SELECT COALESCE(SUM(p.monto), 0)
+                 FROM pagos_alumnos p
+                 WHERE p.alumno_id = ?) AS ingresos_cuotas,
+                (SELECT COALESCE(SUM(m.monto), 0)
+                 FROM movimientos m
+                 WHERE m.alumno_id = ?
+                   AND m.tipo = 'ingreso'
+                   AND m.origen = 'actividad_alumno'
+                   AND m.actividad_id IS NOT NULL) AS ingresos_actividad,
+                (SELECT COALESCE(SUM(m.monto), 0)
+                 FROM movimientos m
+                 WHERE m.alumno_id = ?
+                   AND m.tipo = 'gasto'
+                   AND m.origen = 'actividad_alumno'
+                   AND m.actividad_id IS NOT NULL) AS gastos_asociados,
+                (SELECT COUNT(*)
+                 FROM movimientos m
+                 WHERE m.alumno_id = ?
+                   AND m.origen = 'actividad_alumno'
+                   AND m.actividad_id IS NOT NULL) AS movimientos_asociados
             """,
-            (alumno_id,),
+            (alumno_id, alumno_id, alumno_id, alumno_id),
         )
         historial_cuotas = db.fetchall(
             """
@@ -1949,9 +1966,10 @@ def create_app() -> Flask:
             'pagado_mes': float(resumen_mes['pagado_mes'] or 0),
             'pagos_mes': int(resumen_mes['pagos_mes'] or 0),
             'deuda_mes': deuda_mes,
-            'ingresos_actividad': float(resumen_aportes['ingresos_actividad'] or 0),
-            'gastos_asociados': float(resumen_aportes['gastos_asociados'] or 0),
-            'movimientos_asociados': int(resumen_aportes['movimientos_asociados'] or 0),
+            'ingresos_actividad': float(resumen_totales_alumno['ingresos_actividad'] or 0),
+            'ingresos_asociados': float(resumen_totales_alumno['ingresos_cuotas'] or 0) + float(resumen_totales_alumno['ingresos_actividad'] or 0),
+            'gastos_asociados': float(resumen_totales_alumno['gastos_asociados'] or 0),
+            'movimientos_asociados': int(resumen_totales_alumno['movimientos_asociados'] or 0),
         }
         ficha = {
             'apoderado': alumno.get('apoderado') if hasattr(alumno, 'get') else alumno['apoderado'],
