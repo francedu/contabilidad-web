@@ -1895,6 +1895,8 @@ def create_app() -> Flask:
                    COUNT(*) AS movimientos_asociados
             FROM movimientos m
             WHERE m.alumno_id = ?
+              AND m.origen = 'actividad_alumno'
+              AND m.actividad_id IS NOT NULL
             """,
             (alumno_id,),
         )
@@ -1913,9 +1915,13 @@ def create_app() -> Flask:
                    CASE WHEN m.tipo = 'gasto' THEN 'Egreso asociado' ELSE 'Aporte actividad' END AS tipo,
                    COALESCE(a.nombre, '-') AS actividad
             FROM movimientos m
-            LEFT JOIN actividades a ON a.id = m.actividad_id
-            WHERE m.alumno_id = ?
-               OR (m.origen = 'actividad_alumno' AND m.alumno_id IS NULL AND LOWER(m.concepto) LIKE ?)
+            INNER JOIN actividades a ON a.id = m.actividad_id
+            WHERE m.origen = 'actividad_alumno'
+              AND m.actividad_id IS NOT NULL
+              AND (
+                    m.alumno_id = ?
+                    OR (m.alumno_id IS NULL AND LOWER(m.concepto) LIKE ?)
+                  )
             ORDER BY m.fecha DESC, m.id DESC
             """,
             (alumno_id, sql_like_ci(f'Aporte actividad alumno: {alumno["nombre"]}')[:-1] + '%'),
@@ -1928,8 +1934,10 @@ def create_app() -> Flask:
                    COALESCE(SUM(CASE WHEN m.tipo = 'gasto' THEN m.monto ELSE 0 END), 0) AS egresos,
                    COUNT(*) AS movimientos
             FROM movimientos m
-            LEFT JOIN actividades a ON a.id = m.actividad_id
+            INNER JOIN actividades a ON a.id = m.actividad_id
             WHERE m.alumno_id = ?
+              AND m.origen = 'actividad_alumno'
+              AND m.actividad_id IS NOT NULL
             GROUP BY a.id, a.nombre
             ORDER BY actividad
             """,
@@ -2049,6 +2057,8 @@ def create_app() -> Flask:
                 flash('Ese alumno ya tiene un pago registrado para ese mes.', 'danger')
             elif not alumno_perm:
                 flash('Alumno no encontrado para el colegio/curso seleccionado.', 'danger')
+            elif tipo_pago == 'actividad_alumno' and not actividad_permitida_para_alumno(db, actividad_id, alumno_perm):
+                flash('La actividad seleccionada no pertenece al mismo colegio y curso del alumno.', 'danger')
             elif mes_esta_cerrado(db, alumno_perm['colegio_id'], alumno_perm['curso'], mes) and not current_user.is_admin_global():
                 flash('El mes está cerrado para ese colegio y curso. Solo admin puede modificarlo.', 'danger')
             else:
@@ -3038,6 +3048,17 @@ def siguiente_folio_pago(db: DBAdapter, colegio_id: int) -> int:
     except Exception:
         db.rollback()
         return 1
+
+
+def actividad_permitida_para_alumno(db: DBAdapter, actividad_id: int | None, alumno: Any) -> bool:
+    if not actividad_id or not alumno:
+        return False
+    actividad = db.fetchone('SELECT id, colegio_id, curso FROM actividades WHERE id = ?', (actividad_id,))
+    if not actividad:
+        return False
+    alumno_colegio = int(alumno['colegio_id'] or 1) if 'colegio_id' in alumno.keys() else 1
+    actividad_colegio = int(actividad['colegio_id'] or 1) if 'colegio_id' in actividad.keys() else 1
+    return actividad_colegio == alumno_colegio and normalizar_curso_texto(actividad['curso']) == normalizar_curso_texto(alumno['curso'])
 
 def registrar_pago_alumno(db: DBAdapter, alumno_id: int, fecha: str, mes: str, monto: float, observacion: str, actividad_id: int | None = None, tipo_pago: str = 'cuota_mensual') -> int | None:
     alumno = db.fetchone('SELECT * FROM alumnos WHERE id = ?', (alumno_id,))
