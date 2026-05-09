@@ -923,6 +923,36 @@ def create_app() -> Flask:
             else:
                 alumnos_deuda += 1
 
+        # Desglose de ingresos y gastos para el dashboard.
+        # Usa la misma lógica de filtros por colegio/curso que los demás indicadores.
+        desglose_sql = """
+            SELECT
+                COALESCE(SUM(CASE WHEN m.tipo='ingreso' AND m.origen='cuota_mensual' THEN m.monto ELSE 0 END),0) AS ingresos_cuotas,
+                COALESCE(SUM(CASE WHEN m.tipo='ingreso' AND (m.origen='actividad_alumno' OR m.actividad_id IS NOT NULL) THEN m.monto ELSE 0 END),0) AS ingresos_actividades,
+                COALESCE(SUM(CASE WHEN m.tipo='gasto' THEN m.monto ELSE 0 END),0) AS gastos_total
+            FROM movimientos m
+            LEFT JOIN actividades a ON a.id = m.actividad_id
+            LEFT JOIN alumnos al ON al.id = m.alumno_id
+            WHERE 1=1
+        """
+        desglose_params: list[Any] = []
+        desglose_sql, desglose_params = movimientos_course_filter_sql(desglose_sql, desglose_params)
+        desglose = db.fetchone(desglose_sql, desglose_params)
+
+        desglose_mes_sql = """
+            SELECT
+                COALESCE(SUM(CASE WHEN m.tipo='ingreso' AND m.origen='cuota_mensual' THEN m.monto ELSE 0 END),0) AS ingresos_cuotas_mes,
+                COALESCE(SUM(CASE WHEN m.tipo='ingreso' AND (m.origen='actividad_alumno' OR m.actividad_id IS NOT NULL) THEN m.monto ELSE 0 END),0) AS ingresos_actividades_mes,
+                COALESCE(SUM(CASE WHEN m.tipo='gasto' THEN m.monto ELSE 0 END),0) AS gastos_total_mes
+            FROM movimientos m
+            LEFT JOIN actividades a ON a.id = m.actividad_id
+            LEFT JOIN alumnos al ON al.id = m.alumno_id
+            WHERE substr(m.fecha, 1, 7) = ?
+        """
+        desglose_mes_params: list[Any] = [mes]
+        desglose_mes_sql, desglose_mes_params = movimientos_course_filter_sql(desglose_mes_sql, desglose_mes_params)
+        desglose_mes = db.fetchone(desglose_mes_sql, desglose_mes_params)
+
         ingresos_mes = float(resumen_mes['ingresos_mes'] or 0)
         gastos_mes = float(resumen_mes['gastos_mes'] or 0)
         balance_total = float(resumen['ingresos'] or 0) - float(resumen['gastos'] or 0)
@@ -946,6 +976,12 @@ def create_app() -> Flask:
             'alumnos_deuda': alumnos_deuda,
             'ingresos_mes': ingresos_mes,
             'gastos_mes': gastos_mes,
+            'ingresos_cuotas': float(desglose['ingresos_cuotas'] or 0),
+            'ingresos_actividades': float(desglose['ingresos_actividades'] or 0),
+            'gastos_total': float(desglose['gastos_total'] or 0),
+            'ingresos_cuotas_mes': float(desglose_mes['ingresos_cuotas_mes'] or 0),
+            'ingresos_actividades_mes': float(desglose_mes['ingresos_actividades_mes'] or 0),
+            'gastos_total_mes': float(desglose_mes['gastos_total_mes'] or 0),
             'movimientos_mes': int(resumen_mes['movimientos_mes'] or 0),
             'cumplimiento': cumplimiento,
             'ultimo_mes': ultimo_mes,
@@ -2008,6 +2044,7 @@ def create_app() -> Flask:
         raw_colegio = (request.form.get('colegio_id') if request.method == 'POST' else request.args.get('colegio_id')) or ''
         if str(raw_colegio).strip().isdigit():
             selected_pago_colegio_id = int(str(raw_colegio).strip())
+        selected_pago_curso = ((request.form.get('curso') if request.method == 'POST' else request.args.get('curso')) or '').strip()
 
         alumnos_sql = """
             SELECT a.id, a.nombre, a.curso, a.colegio_id, a.cuota_mensual, c.nombre AS colegio_nombre
@@ -2020,7 +2057,7 @@ def create_app() -> Flask:
             if selected_pago_colegio_id:
                 alumnos_sql += ' AND COALESCE(a.colegio_id, 1) = ?'
                 alumnos_params.append(selected_pago_colegio_id)
-            curso_admin = admin_selected_course()
+            curso_admin = selected_pago_curso
             if curso_admin:
                 alumnos_sql += " AND lower(trim(COALESCE(a.curso, ''))) = lower(trim(?))"
                 alumnos_params.append(curso_admin)
@@ -2040,7 +2077,7 @@ def create_app() -> Flask:
             if selected_pago_colegio_id:
                 actividades_sql += ' AND COALESCE(a.colegio_id, 1) = ?'
                 actividades_params.append(selected_pago_colegio_id)
-            curso_admin = admin_selected_course()
+            curso_admin = selected_pago_curso
             if curso_admin:
                 actividades_sql += " AND lower(trim(COALESCE(a.curso, ''))) = lower(trim(?))"
                 actividades_params.append(curso_admin)
@@ -2063,7 +2100,7 @@ def create_app() -> Flask:
                 datetime.strptime(mes + '-01', '%Y-%m-%d')
             except Exception:
                 flash('Fecha o mes inválido.', 'danger')
-                return render_template('pagos_form.html', alumnos=alumnos, actividades=actividades, pago=None, selected_pago_colegio_id=selected_pago_colegio_id)
+                return render_template('pagos_form.html', alumnos=alumnos, actividades=actividades, pago=None, selected_pago_colegio_id=selected_pago_colegio_id, selected_pago_curso=selected_pago_curso)
             alumno_perm = fetch_alumno_permitido(db, alumno_id) if alumno_id else None
             if not alumno_id:
                 flash('Debes seleccionar un alumno.', 'danger')
@@ -2111,8 +2148,8 @@ def create_app() -> Flask:
                     except Exception as exc:
                         flash(f'El pago fue registrado, pero no se pudo enviar el comprobante automático: {exc}', 'warning')
 
-                return redirect(url_for('pagos_list', colegio_id=selected_pago_colegio_id) if selected_pago_colegio_id else url_for('pagos_list'))
-        return render_template('pagos_form.html', alumnos=alumnos, actividades=actividades, pago=None, selected_pago_colegio_id=selected_pago_colegio_id)
+                return redirect(url_for('pagos_list', colegio_id=selected_pago_colegio_id, curso=selected_pago_curso) if selected_pago_colegio_id or selected_pago_curso else url_for('pagos_list'))
+        return render_template('pagos_form.html', alumnos=alumnos, actividades=actividades, pago=None, selected_pago_colegio_id=selected_pago_colegio_id, selected_pago_curso=selected_pago_curso)
 
     @app.route('/pagos/<int:pago_id>/editar', methods=['GET', 'POST'])
     @role_required('admin', 'presidente', 'tesorero', 'secretario')
@@ -2438,6 +2475,11 @@ def create_app() -> Flask:
     @role_required('admin', 'presidente', 'tesorero', 'secretario')
     def actividades_new():
         db = get_db()
+        selected_actividad_colegio_id = None
+        raw_colegio = (request.form.get('colegio_id') if request.method == 'POST' else request.args.get('colegio_id')) or ''
+        if str(raw_colegio).strip().isdigit():
+            selected_actividad_colegio_id = int(str(raw_colegio).strip())
+        actividad_course_options = get_available_courses(include_dynamic=True, colegio_id=selected_actividad_colegio_id) if selected_actividad_colegio_id else get_available_courses(include_dynamic=True)
         if request.method == 'POST':
             nombre = request.form.get('nombre', '').strip()
             fecha = request.form.get('fecha', '').strip()
@@ -2447,15 +2489,19 @@ def create_app() -> Flask:
                 validar_fecha(fecha)
             except Exception:
                 flash('Fecha inválida.', 'danger')
-                return render_template('actividades_form.html', actividad=None)
-            if not ensure_course_access(curso, resolve_colegio_for_course(curso)):
-                flash('No puedes crear actividades en otro curso.', 'danger')
-                return render_template('actividades_form.html', actividad=None)
-            db.execute('INSERT INTO actividades (nombre, fecha, curso, colegio_id, descripcion) VALUES (?, ?, ?, ?, ?)', (nombre, fecha, curso or None, resolve_colegio_for_course(curso), descripcion))
+                return render_template('actividades_form.html', actividad=None, selected_actividad_colegio_id=selected_actividad_colegio_id, actividad_course_options=actividad_course_options)
+            colegio_actividad = resolve_colegio_for_course(curso)
+            if current_user.is_admin_global() and not colegio_actividad:
+                flash('Debes seleccionar un colegio para la actividad.', 'danger')
+                return render_template('actividades_form.html', actividad=None, selected_actividad_colegio_id=selected_actividad_colegio_id, actividad_course_options=actividad_course_options)
+            if not ensure_course_access(curso, colegio_actividad):
+                flash('No puedes crear actividades en otro colegio/curso.', 'danger')
+                return render_template('actividades_form.html', actividad=None, selected_actividad_colegio_id=selected_actividad_colegio_id, actividad_course_options=actividad_course_options)
+            db.execute('INSERT INTO actividades (nombre, fecha, curso, colegio_id, descripcion) VALUES (?, ?, ?, ?, ?)', (nombre, fecha, curso or None, colegio_actividad, descripcion))
             db.commit()
             flash('Actividad creada.', 'success')
             return redirect(url_for('actividades_list'))
-        return render_template('actividades_form.html', actividad=None)
+        return render_template('actividades_form.html', actividad=None, selected_actividad_colegio_id=selected_actividad_colegio_id, actividad_course_options=actividad_course_options)
 
     @app.route('/actividades/<int:actividad_id>/editar', methods=['GET', 'POST'])
     @role_required('admin', 'presidente', 'tesorero', 'secretario')
