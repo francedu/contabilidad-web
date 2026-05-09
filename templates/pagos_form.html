@@ -3,7 +3,6 @@
 {% block content %}
 {% set selected_alumno = (pago['alumno_id'] if pago else request.args.get('alumno_id', ''))|string %}
 {% set selected_pago_colegio_id = selected_pago_colegio_id if selected_pago_colegio_id is defined else (pago['colegio_id'] if pago and 'colegio_id' in pago.keys() else selected_colegio_id) %}
-{% set selected_pago_curso = selected_pago_curso if selected_pago_curso is defined else selected_admin_course %}
 <div class="form-shell mx-auto">
   <div class="page-head mb-3">
     <div class="page-eyebrow">Cobros</div>
@@ -23,25 +22,11 @@
           </select>
           <div class="form-text">Selecciona un colegio para ver solo sus alumnos. Si lo dejas en todos, el nombre del colegio aparecerá junto al alumno.</div>
         </div>
-        <div class="col-md-6">
-          <label class="form-label">Filtrar alumnos por curso</label>
-          <select class="form-select" id="filtroCursoPago">
-            <option value="">Todos los cursos</option>
-            {% for curso in predefined_courses %}
-              <option value="{{ curso }}" {% if selected_pago_curso == curso %}selected{% endif %}>{{ curso }}</option>
-            {% endfor %}
-            {% if selected_pago_curso and selected_pago_curso not in predefined_courses %}
-              <option value="{{ selected_pago_curso }}" selected>{{ selected_pago_curso }}</option>
-            {% endif %}
-          </select>
-          <div class="form-text">Para el usuario admin, este filtro limita los alumnos y actividades al curso elegido.</div>
-        </div>
       </div>
     {% endif %}
     <form method="post" class="row g-3">
     {% if current_user.is_admin_global() and not pago %}
       <input type="hidden" name="colegio_id" value="{{ selected_pago_colegio_id or '' }}">
-      <input type="hidden" name="curso" value="{{ selected_pago_curso or '' }}">
     {% endif %}
     <div class="col-md-6">
       <label class="form-label">Alumno</label>
@@ -74,17 +59,14 @@
 {% if current_user.is_admin_global() and not pago %}
 <script>
 const filtroColegioPago = document.getElementById('filtroColegioPago');
-const filtroCursoPago = document.getElementById('filtroCursoPago');
-function actualizarFiltrosPago() {
-  const url = new URL(window.location.href);
-  if (filtroColegioPago && filtroColegioPago.value) { url.searchParams.set('colegio_id', filtroColegioPago.value); }
-  else { url.searchParams.delete('colegio_id'); }
-  if (filtroCursoPago && filtroCursoPago.value) { url.searchParams.set('curso', filtroCursoPago.value); }
-  else { url.searchParams.delete('curso'); }
-  window.location.href = url.toString();
+if (filtroColegioPago) {
+  filtroColegioPago.addEventListener('change', function () {
+    const url = new URL(window.location.href);
+    if (this.value) { url.searchParams.set('colegio_id', this.value); }
+    else { url.searchParams.delete('colegio_id'); }
+    window.location.href = url.toString();
+  });
 }
-if (filtroColegioPago) filtroColegioPago.addEventListener('change', actualizarFiltrosPago);
-if (filtroCursoPago) filtroCursoPago.addEventListener('change', actualizarFiltrosPago);
 </script>
 {% endif %}
 {% if not pago %}<script>function toggleActividad(){const isAporte=document.getElementById('tipoPago').value==='actividad_alumno';document.getElementById('actividadWrap').style.display=isAporte?'block':'none';}document.getElementById('tipoPago').addEventListener('change',toggleActividad);toggleActividad();</script>{% endif %}

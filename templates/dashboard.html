@@ -45,21 +45,15 @@
       <div class="metric-value">{{ dashboard_stats['alumnos_activos'] }}</div>
       <div class="metric-foot">🟢 {{ dashboard_stats['alumnos_pagados'] }} · 🟡 {{ dashboard_stats['alumnos_parciales'] }} · 🔴 {{ dashboard_stats['alumnos_deuda'] }}</div>
     </div>
-  </div>
+  
   <div class="col-md-6 col-xl-3">
-    <div class="metric-card metric-balance">
-      <div class="metric-top"><span>Ingresos por cuotas</span><span class="metric-icon">💵</span></div>
-      <div class="metric-value">{{ formato_monto(dashboard_stats['ingresos_cuotas']) }}</div>
-      <div class="metric-foot">Ingresos mensuales provenientes de cuotas</div>
+    <div class="metric-card metric-expenses">
+      <div class="metric-top"><span>Total gastos</span><span class="metric-icon">💸</span></div>
+      <div class="metric-value">{{ formato_monto(resumen['gastos']) }}</div>
+      <div class="metric-foot">Gastos acumulados registrados</div>
     </div>
   </div>
-  <div class="col-md-6 col-xl-3">
-    <div class="metric-card metric-month">
-      <div class="metric-top"><span>Ingresos por actividades</span><span class="metric-icon">🎯</span></div>
-      <div class="metric-value">{{ formato_monto(dashboard_stats['ingresos_actividades']) }}</div>
-      <div class="metric-foot">Ingresos mensuales generados por actividades</div>
-    </div>
-  </div>
+
 </div>
 
 {% if current_user.is_admin_global() and resumen_colegios %}
