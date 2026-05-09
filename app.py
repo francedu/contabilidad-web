@@ -936,6 +936,19 @@ def create_app() -> Flask:
             {'label': 'Ver cuotas', 'href': url_for('cuotas_view', mes=mes), 'icon': '📌', 'hint': 'Revisar estado mensual'},
         ]
 
+        resumen_ingresos_sql = """
+            SELECT
+                COALESCE(SUM(CASE WHEN m.tipo='ingreso' AND (m.actividad_id IS NULL OR m.actividad_id = 0) THEN m.monto ELSE 0 END),0) ingresos_cuotas,
+                COALESCE(SUM(CASE WHEN m.tipo='ingreso' AND m.actividad_id IS NOT NULL THEN m.monto ELSE 0 END),0) ingresos_actividades
+            FROM movimientos m
+            LEFT JOIN actividades a ON a.id = m.actividad_id
+            LEFT JOIN alumnos al ON al.id = m.alumno_id
+            WHERE substr(m.fecha, 1, 7) = ?
+        """
+        resumen_ingresos_params = [mes]
+        resumen_ingresos_sql, resumen_ingresos_params = movimientos_course_filter_sql(resumen_ingresos_sql, resumen_ingresos_params)
+        resumen_ingresos = db.fetchone(resumen_ingresos_sql, resumen_ingresos_params)
+
         dashboard_stats = {
             'balance_total': balance_total,
             'balance_mes': balance_mes,
@@ -951,6 +964,8 @@ def create_app() -> Flask:
             'ultimo_mes': ultimo_mes,
             'total_esperado': total_esperado,
             'total_pagado': total_pagado,
+            'ingresos_cuotas': float(resumen_ingresos['ingresos_cuotas'] or 0),
+            'ingresos_actividades': float(resumen_ingresos['ingresos_actividades'] or 0),
         }
 
         resumen_colegios = []
