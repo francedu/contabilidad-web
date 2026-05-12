@@ -3122,7 +3122,7 @@ def actividad_permitida_para_alumno(db: DBAdapter, actividad_id: int | None, alu
         return False
     alumno_colegio = int(alumno['colegio_id'] or 1) if 'colegio_id' in alumno.keys() else 1
     actividad_colegio = int(actividad['colegio_id'] or 1) if 'colegio_id' in actividad.keys() else 1
-    return actividad_colegio == alumno_colegio and normalizar_curso_texto(actividad['curso']) == normalizar_curso_texto(alumno['curso'])
+    return actividad_colegio == alumno_colegio and normalize_course(actividad['curso']) == normalize_course(alumno['curso'])
 
 def registrar_pago_alumno(db: DBAdapter, alumno_id: int, fecha: str, mes: str, monto: float, observacion: str, actividad_id: int | None = None, tipo_pago: str = 'cuota_mensual') -> int | None:
     alumno = db.fetchone('SELECT * FROM alumnos WHERE id = ?', (alumno_id,))
