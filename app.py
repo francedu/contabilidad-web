@@ -2919,6 +2919,10 @@ def sql_like_ci(value: str) -> str:
     return f"%{(value or '').strip().lower()}%"
 
 
+def normalizar_curso_texto(valor: str | None) -> str:
+    return ' '.join((valor or '').strip().lower().split())
+
+
 def obtener_movimientos_filtrados(db: DBAdapter, tipo: str = 'Todos', mes: str = '', q: str = '', fecha_desde: str = '', fecha_hasta: str = '', actividad_id: str | int = '', alumno_id: str = '', curso_scope: str | None = None, colegio_scope: int | None = None):
     sql = """
         SELECT m.id, m.fecha, m.tipo, m.concepto, m.monto, COALESCE(a.nombre, '-') AS actividad,
@@ -3122,7 +3126,7 @@ def actividad_permitida_para_alumno(db: DBAdapter, actividad_id: int | None, alu
         return False
     alumno_colegio = int(alumno['colegio_id'] or 1) if 'colegio_id' in alumno.keys() else 1
     actividad_colegio = int(actividad['colegio_id'] or 1) if 'colegio_id' in actividad.keys() else 1
-    return actividad_colegio == alumno_colegio and normalize_course(actividad['curso']) == normalize_course(alumno['curso'])
+    return actividad_colegio == alumno_colegio and normalizar_curso_texto(actividad['curso']) == normalizar_curso_texto(alumno['curso'])
 
 def registrar_pago_alumno(db: DBAdapter, alumno_id: int, fecha: str, mes: str, monto: float, observacion: str, actividad_id: int | None = None, tipo_pago: str = 'cuota_mensual') -> int | None:
     alumno = db.fetchone('SELECT * FROM alumnos WHERE id = ?', (alumno_id,))
